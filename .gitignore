@@ -1,0 +1,22 @@
+# secrets
+.env
+.env.*
+!.env.example
+
+# data lives under DATA_ROOT, never in git
+data/
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+
+# editors and os
+.vscode/
+.idea/
+.DS_Store

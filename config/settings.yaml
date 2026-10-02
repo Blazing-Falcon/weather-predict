@@ -1,0 +1,40 @@
+# Verified source constants. Values change only with a measurement behind them.
+bmkg:
+  url: https://api.bmkg.go.id/publik/prakiraan-cuaca
+  max_rpm: 55                  # BMKG limit is 60 per minute per IP
+  tick_minutes: 15
+  retry_missing_hours: 6
+  rain_codes_min: 60           # codes 60-99 count as rain for the baseline
+
+imerg:
+  collection: C2723758340-GES_DISC        # GPM_3IMERGHHE v07
+  opendap: https://opendap.earthdata.nasa.gov/collections/C2723758340-GES_DISC/granules/
+  variable: /Grid/precipitation           # [time][lon][lat], lat ascending, mm/hr, fill -9999.9
+  lon_index: [2740, 3219]                 # 94.05E .. 141.95E (cell centres, 0.1 deg)
+  lat_index: [785, 964]                   # 11.45S .. 6.45N
+  wet_mm_h: 0.1
+  lag_minutes: 300                        # replace with measured p90 live latency
+
+mergir:
+  collection: C1432254058-GES_DISC        # GPM_MERGIR v1
+  opendap: https://opendap.earthdata.nasa.gov/collections/C1432254058-GES_DISC/granules/
+  variable: /Tb                           # [time 2][lat][lon], int16 K, fill -9999
+  lat_index: [1333, 1827]                 # -11.4797 .. 6.4948
+  lon_index: [7532, 8850]                 # 94.0198 .. 141.9665
+  cold_k: 233
+
+himawari:
+  bucket_url: https://noaa-himawari9.s3.amazonaws.com/
+  prefix: AHI-L1b-FLDK/{yyyy}/{mm}/{dd}/{HHMM}/
+  band: B13
+  segments: [5, 6, 7]                     # check coverage on first decode
+
+cmr:
+  granules: https://cmr.earthdata.nasa.gov/search/granules.json
+
+nasa:
+  parallel: 8
+
+target:
+  threshold_mm_h: 0.5
+  leads_h: [1, 2, 3]

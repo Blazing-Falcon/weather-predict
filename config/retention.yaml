@@ -1,0 +1,23 @@
+# Retention windows per dataset. The retention job deletes whole partitions older than their window.
+budget_gb: 8            # disk check fails above this (DATA_ROOT without tmp/)
+
+datasets:
+  bronze/bmkg:           {keep: 12 months}
+  bronze/bmkg/_dlq:      {keep: 3 months}
+  bronze/imerg:          {keep: 7 days}
+  bronze/mergir:         {keep: 7 days}
+  bronze/himawari:       {keep: 6 hours}
+  bronze/gauges:         {keep: 7 days}
+  silver/rain_kabkota:   {keep: 10 years}
+  silver/cloud_kabkota:  {keep: 10 years}
+  silver/bmkg_forecast:  {keep: 3 years}
+  silver/gauge_obs:      {keep: 10 years}
+  gold/predictions:      {keep: 12 months}
+  gold/verification:     {keep: 12 months}
+  gold/scores_daily:     {keep: 10 years}
+  gold/map_frames:       {keep: 7 days}
+  gold/tiles/rain:       {keep: 30 days}
+  gold/tiles/cloud:      {keep: 7 days}
+  models:                {keep_versions: 5}
+  dagster_runs:          {keep: 30 days}
+  dagster_compute_logs:  {keep: 30 days}

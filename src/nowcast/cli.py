@@ -5,6 +5,7 @@ import typer
 from nowcast import __version__
 from nowcast.doctor import doctor
 from nowcast.registry.cli import app as registry_app
+from nowcast.sources.bmkg import tick as bmkg_tick
 
 app = typer.Typer(
     no_args_is_help=True,
@@ -12,6 +13,9 @@ app = typer.Typer(
 )
 app.command()(doctor)
 app.add_typer(registry_app, name="registry")
+bmkg_app = typer.Typer(no_args_is_help=True, help="Archive live BMKG forecasts.")
+bmkg_app.command("tick")(bmkg_tick)
+app.add_typer(bmkg_app, name="bmkg")
 
 
 @app.callback(invoke_without_command=True)

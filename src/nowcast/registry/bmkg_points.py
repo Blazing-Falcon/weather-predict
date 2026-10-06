@@ -7,22 +7,10 @@ import httpx
 import typer
 
 from nowcast import config, http, paths
+from nowcast.http import rate_limit
 from nowcast.log import get_logger
 
 VILLAGES_URL = "https://wilayah.id/api/villages"
-
-
-def rate_limit(interval: float):
-    next_request = 0.0
-
-    def wait(_request: httpx.Request) -> None:
-        nonlocal next_request
-        delay = next_request - monotonic()
-        if delay > 0:
-            sleep(delay)
-        next_request = monotonic() + interval
-
-    return wait
 
 
 def fetch_json(client, url, **kwargs):
@@ -133,8 +121,12 @@ def sweep(limit: int | None) -> None:
         done = failed = 0
         started = monotonic()
         with http.client() as wilayah_client, http.client() as bmkg_client:
-            wilayah_client.event_hooks["request"].append(rate_limit(1 / 5))
-            bmkg_client.event_hooks["request"].append(rate_limit(60 / min(rpm, 55)))
+            wilayah_client.event_hooks["request"].append(
+                rate_limit(1 / 5, monotonic=monotonic, sleep=sleep)
+            )
+            bmkg_client.event_hooks["request"].append(
+                rate_limit(60 / min(rpm, 55), monotonic=monotonic, sleep=sleep)
+            )
 
             for processed, row in enumerate(batch, start=1):
                 code = row["kecamatan_code"]

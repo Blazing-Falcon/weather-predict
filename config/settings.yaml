@@ -4,6 +4,7 @@ bmkg:
   max_rpm: 55                  # BMKG limit is 60 per minute per IP
   tick_minutes: 15
   retry_missing_hours: 6
+  sentinels: ["35.73", "73.71", "91.71"]
   rain_codes_min: 60           # codes 60-99 count as rain for the baseline
 
 imerg:

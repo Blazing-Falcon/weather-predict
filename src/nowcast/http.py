@@ -1,10 +1,31 @@
 import math
 import time
+from collections.abc import Callable
 
 import httpx
 
 from nowcast import __version__, config
 from nowcast.log import get_logger, redact
+
+
+def rate_limit(
+    interval: float,
+    *,
+    monotonic: Callable[[], float] | None = None,
+    sleep: Callable[[float], None] | None = None,
+) -> Callable[[httpx.Request], None]:
+    monotonic = monotonic if monotonic is not None else time.monotonic
+    sleep = sleep if sleep is not None else time.sleep
+    next_request = 0.0
+
+    def wait(_request: httpx.Request) -> None:
+        nonlocal next_request
+        delay = next_request - monotonic()
+        if delay > 0:
+            sleep(delay)
+        next_request = monotonic() + interval
+
+    return wait
 
 
 def client(auth: bool = False, timeout: float = 30.0) -> httpx.Client:

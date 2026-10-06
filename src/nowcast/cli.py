@@ -5,6 +5,7 @@ import typer
 from nowcast import __version__
 from nowcast.doctor import doctor
 from nowcast.registry.cli import app as registry_app
+from nowcast.silver.bmkg import parse as bmkg_parse
 from nowcast.sources.bmkg import tick as bmkg_tick
 
 app = typer.Typer(
@@ -15,6 +16,7 @@ app.command()(doctor)
 app.add_typer(registry_app, name="registry")
 bmkg_app = typer.Typer(no_args_is_help=True, help="Archive live BMKG forecasts.")
 bmkg_app.command("tick")(bmkg_tick)
+bmkg_app.command("parse")(bmkg_parse)
 app.add_typer(bmkg_app, name="bmkg")
 
 

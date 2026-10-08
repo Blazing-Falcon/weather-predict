@@ -190,3 +190,156 @@ def test_backfill_403_then_resume_and_skip(monkeypatch, sample, tmp_path):
     assert state["versions"] == {"V07C": 2}
     assert runner.invoke(app, command).exit_code == 0
     assert len(requests) == 3
+
+
+def test_merge_month(sample, tmp_path):
+    grid, membership, crop = sample
+    archive = tmp_path / "silver"
+    zonal = Zonal(membership, grid.width * grid.height)
+    slots = [START + i * imerg.SLOT_LENGTH for i in range(3)]
+    a, b, newer_b, c = [
+        imerg.Granule(slot, f"{slot:%H%M}-{version}", version)
+        for slot, version in zip([slots[0], slots[1], slots[1], slots[2]],
+                                 ["V07B", "V07B", "V07C", "V07C"], strict=True)
+    ]
+    for granule in (a, b, newer_b, c):
+        (crop.parent / f"{granule.title}.nc4").hardlink_to(crop)
+    imerg.write_month([a, b], crop.parent, archive, grid, zonal)
+    for _ in range(2):
+        imerg.write_month([newer_b, c], crop.parent, archive, grid, zonal, merge=True)
+    rain = pq.read_table(archive / "part.parquet")
+    assert rain.select(["slot", "area_id", "product_version"]).to_pydict() == {
+        "slot": slots * 2,
+        "area_id": [4] * 3 + [9] * 3,
+        "product_version": ["V07B", "V07C", "V07C"] * 2,
+    }
+    manifest = pq.read_table(archive / "_manifest.parquet")
+    assert manifest["slot"].to_pylist() == slots
+    assert manifest["title"].to_pylist() == [a.title, newer_b.title, c.title]
+    assert manifest["product_version"].to_pylist() == ["V07B", "V07C", "V07C"]
+
+
+@pytest.fixture
+def live(monkeypatch, sample, tmp_path):
+    _, membership, crop = sample
+    root = tmp_path / "data"
+    ref = root / "ref"
+    ref.mkdir(parents=True)
+    pq.write_table(membership, ref / "imerg_membership.parquet")
+    monkeypatch.setenv("DATA_ROOT", str(root))
+    state = root / "state"
+    state.mkdir()
+    cursor = state / "imerg_live.json"
+    now = END + timedelta(hours=4)
+    previous = END - timedelta(hours=1)
+    cursor.write_text(json.dumps({"last_slot": previous.isoformat(), "processed": 3}))
+    titles = [
+        V07C.replace("20250101-S000000-E002959.0000", "20250131-S230000-E232959.1380"),
+        V07C.replace("20250101-S000000-E002959.0000", "20250131-S233000-E235959.1410"),
+        V07C.replace("20250101", "20250201"),
+    ]
+    searches = []
+
+    def list_granules(collection, start, end):
+        searches.append((start, end))
+        return [{"title": title} for title in titles]
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz):
+            return now
+
+    content = crop.read_bytes()
+    monkeypatch.setattr(imerg, "datetime", Clock)
+    monkeypatch.setattr(cmr, "granules", list_granules)
+    monkeypatch.setattr(imerg.http, "client", lambda auth: httpx.Client(
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, content=content))
+    ))
+    return root, cursor, previous, now, titles, searches
+
+
+def test_tick_month_boundary(live):
+    root, cursor, previous, now, titles, searches = live
+    runner = CliRunner()
+    result = runner.invoke(app, ["imerg", "tick"])
+    assert result.exit_code == 0, result.output
+    assert searches == [(previous + timedelta(seconds=1), now)]
+    for month, slot, title in zip(
+        (1, 2), (END - imerg.SLOT_LENGTH, END), titles[1:], strict=True
+    ):
+        partition = f"year=2025/month={month:02d}"
+        silver = root / "silver/rain_kabkota" / partition
+        assert pq.ParquetFile(silver / "part.parquet").read()["slot"].to_pylist() == [slot] * 2
+        assert pq.ParquetFile(silver / "_manifest.parquet").read()["title"].to_pylist() == [title]
+        assert (root / "bronze/imerg" / partition / f"{title}.nc4").exists()
+    assert json.loads(cursor.read_text()) == {"last_slot": END.isoformat(), "processed": 5}
+    latency = root / "state/imerg_latency.jsonl"
+    lines = [json.loads(line) for line in latency.read_text().splitlines()]
+    assert lines[-1] == {
+        "slot": END.isoformat(), "title": titles[-1], "version": "V07C",
+        "seen_at": now.isoformat(), "latency_min": 210,
+    }
+    health = root / "state/health/imerg.json"
+    assert json.loads(health.read_text()) == {
+        "last_tick": now.isoformat(), "last_slot": END.isoformat(), "new_slots": 2,
+        "latency_min_last": 210, "latency_min_p90_24h": 237,
+    }
+    assert runner.invoke(app, ["imerg", "tick"]).exit_code == 0
+    assert len(latency.read_text().splitlines()) == 2
+    assert json.loads(health.read_text())["new_slots"] == 0
+
+
+def test_tick_cursor_waits_for_writer(live, monkeypatch):
+    root, cursor, previous, _, _, _ = live
+    write_table = imerg.write_table
+
+    def fail_manifest(table, path):
+        if path.name == "_manifest.parquet" and path.parent.name == "month=02":
+            raise OSError("manifest write failed")
+        write_table(table, path)
+
+    monkeypatch.setattr(imerg, "write_table", fail_manifest)
+    runner = CliRunner()
+    result = runner.invoke(app, ["imerg", "tick"])
+    assert result.exit_code == 1
+    assert "manifest write failed" in result.output
+    assert json.loads(cursor.read_text()) == {"last_slot": previous.isoformat(), "processed": 3}
+    assert not (root / "state/imerg_latency.jsonl").exists()
+    monkeypatch.setattr(imerg, "write_table", write_table)
+    result = runner.invoke(app, ["imerg", "tick"])
+    assert result.exit_code == 0, result.output
+    assert json.loads(cursor.read_text()) == {"last_slot": END.isoformat(), "processed": 5}
+
+
+def test_gaps(monkeypatch, tmp_path):
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz):
+            return START + timedelta(days=1)
+
+    monkeypatch.setattr(imerg, "datetime", Clock)
+    monkeypatch.setenv("DATA_ROOT", str(tmp_path))
+    part = tmp_path / "silver/rain_kabkota/year=2025/month=01/part.parquet"
+    part.parent.mkdir(parents=True)
+    slots = [START + i * imerg.SLOT_LENGTH for i in range(8)]
+    present = [slots[i] for i in (0, 2, 6, 7)]
+    count = len(present) * 514
+    pq.write_table(pa.table({
+        "slot": np.repeat(present, 514).tolist(),
+        "rain_mean_x10": [None] + [0] * (count - 1),
+        "product_version": ["V07B"] * 514 + ["V07C"] * (count - 514),
+    }), part)
+    result = CliRunner().invoke(app, ["imerg", "gaps", "--month", "2025-01"])
+    assert result.exit_code == 0, result.output
+    report = json.loads(result.output)
+    assert json.loads((tmp_path / "state/imerg_gaps/2025-01.json").read_text()) == report
+    assert report == {
+        "month": "2025-01", "expected_slots": 8, "present_slots": 4,
+        "missing_slots": [slots[i].isoformat() for i in (1, 3, 4, 5)],
+        "missing_runs": [
+            {"start": slots[1].isoformat(), "end": slots[1].isoformat(), "slots": 1},
+            {"start": slots[3].isoformat(), "end": slots[5].isoformat(), "slots": 3},
+        ],
+        "rows_per_slot_min": 514, "rows_per_slot_max": 514,
+        "versions": {"V07B": 1, "V07C": 3}, "null_area_slots": 1,
+    }

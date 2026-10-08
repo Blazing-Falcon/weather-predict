@@ -23,6 +23,12 @@ mergir:
   lat_index: [1333, 1827]                 # -11.4797 .. 6.4948
   lon_index: [7532, 8850]                 # 94.0198 .. 141.9665
   cold_k: 233
+  flow:
+    preset: medium          # OpenCV DIS preset
+    warm_k: 288.15          # coldness image: 0 at warm_k, 255 at cold_end_k
+    cold_end_k: 193.15
+    sigma_km: 66            # Gaussian smoothing of the flow field
+    steps: [2, 4, 6]        # half-hour steps ahead for +1, +2, +3 h
 
 himawari:
   bucket_url: https://noaa-himawari9.s3.amazonaws.com/

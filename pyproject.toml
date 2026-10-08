@@ -6,6 +6,7 @@ dependencies = [
     "geopandas==1.2.0",
     "h5py==3.16.0",
     "httpx==0.28.1",
+    "opencv-python-headless==5.1.0.95",
     "pyarrow==26.0.1",
     "pyproj==3.8.0",
     "python-dotenv==1.2.4",

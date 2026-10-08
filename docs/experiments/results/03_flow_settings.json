@@ -1,0 +1,379 @@
+{
+  "frames": 336,
+  "invalid_pixels": 530814,
+  "fully_invalid_frames": 0,
+  "motion_frames": 333,
+  "fallback_frames": 1,
+  "pixel_km": 4.043584713103127,
+  "dis_ms_per_frame": {
+    "fast": 14.45122612313663,
+    "medium": 70.59050388287942
+  },
+  "settings": [
+    {
+      "setting": "Persistence",
+      "preset": null,
+      "sigma_km": null,
+      "field_ms_per_frame": null,
+      "median_cold_speed_kmh": 0.0,
+      "leads": [
+        {
+          "hours": 1,
+          "mae_frames": 334,
+          "csi_frames": 334,
+          "area_pairs": 171672,
+          "mae_pp": 8.937754851868156,
+          "csi": 0.4964249338559798,
+          "mae_skill": 0.0,
+          "csi_difference": 0.0
+        },
+        {
+          "hours": 2,
+          "mae_frames": 332,
+          "csi_frames": 332,
+          "area_pairs": 170644,
+          "mae_pp": 14.317331621560777,
+          "csi": 0.3576433806229577,
+          "mae_skill": 0.0,
+          "csi_difference": 0.0
+        },
+        {
+          "hours": 3,
+          "mae_frames": 330,
+          "csi_frames": 330,
+          "area_pairs": 169616,
+          "mae_pp": 18.30180810080463,
+          "csi": 0.27820706609479995,
+          "mae_skill": 0.0,
+          "csi_difference": 0.0
+        }
+      ]
+    },
+    {
+      "setting": "fast 0 km",
+      "preset": "fast",
+      "sigma_km": 0,
+      "field_ms_per_frame": 14.452849195232968,
+      "median_cold_speed_kmh": 34.65944683334715,
+      "leads": [
+        {
+          "hours": 1,
+          "mae_frames": 334,
+          "csi_frames": 334,
+          "area_pairs": 171672,
+          "mae_pp": 7.592225803927221,
+          "csi": 0.5837035502148311,
+          "mae_skill": 0.1505444119067212,
+          "csi_difference": 0.08727861635885131
+        },
+        {
+          "hours": 2,
+          "mae_frames": 332,
+          "csi_frames": 332,
+          "area_pairs": 170644,
+          "mae_pp": 13.091391810813276,
+          "csi": 0.41522533753021706,
+          "mae_skill": 0.08562627751817475,
+          "csi_difference": 0.05758195690725937
+        },
+        {
+          "hours": 3,
+          "mae_frames": 330,
+          "csi_frames": 330,
+          "area_pairs": 169616,
+          "mae_pp": 17.46666474745865,
+          "csi": 0.310644732376775,
+          "mae_skill": 0.04563174024916494,
+          "csi_difference": 0.03243766628197503
+        }
+      ]
+    },
+    {
+      "setting": "fast 33 km",
+      "preset": "fast",
+      "sigma_km": 33,
+      "field_ms_per_frame": 29.644873606631737,
+      "median_cold_speed_kmh": 34.22681655630635,
+      "leads": [
+        {
+          "hours": 1,
+          "mae_frames": 334,
+          "csi_frames": 334,
+          "area_pairs": 171672,
+          "mae_pp": 7.6524210322840815,
+          "csi": 0.5820178186822633,
+          "mae_skill": 0.14380947350725515,
+          "csi_difference": 0.08559288482628352
+        },
+        {
+          "hours": 2,
+          "mae_frames": 332,
+          "csi_frames": 332,
+          "area_pairs": 170644,
+          "mae_pp": 13.067918028672374,
+          "csi": 0.4158991867920891,
+          "mae_skill": 0.0872658136245783,
+          "csi_difference": 0.0582558061691314
+        },
+        {
+          "hours": 3,
+          "mae_frames": 330,
+          "csi_frames": 330,
+          "area_pairs": 169616,
+          "mae_pp": 17.376577594729,
+          "csi": 0.3121799465961496,
+          "mae_skill": 0.05055404913981998,
+          "csi_difference": 0.03397288050134967
+        }
+      ]
+    },
+    {
+      "setting": "fast 66 km",
+      "preset": "fast",
+      "sigma_km": 66,
+      "field_ms_per_frame": 49.29459785887809,
+      "median_cold_speed_kmh": 33.457573091850655,
+      "leads": [
+        {
+          "hours": 1,
+          "mae_frames": 334,
+          "csi_frames": 334,
+          "area_pairs": 171672,
+          "mae_pp": 7.769335495618542,
+          "csi": 0.577466076588118,
+          "mae_skill": 0.13072850795470115,
+          "csi_difference": 0.0810411427321382
+        },
+        {
+          "hours": 2,
+          "mae_frames": 332,
+          "csi_frames": 332,
+          "area_pairs": 170644,
+          "mae_pp": 13.130307886137013,
+          "csi": 0.4143197215769237,
+          "mae_skill": 0.08290816800221346,
+          "csi_difference": 0.05667634095396601
+        },
+        {
+          "hours": 3,
+          "mae_frames": 330,
+          "csi_frames": 330,
+          "area_pairs": 169616,
+          "mae_pp": 17.343582168420046,
+          "csi": 0.3132629727409466,
+          "mae_skill": 0.05235689977223934,
+          "csi_difference": 0.03505590664614666
+        }
+      ]
+    },
+    {
+      "setting": "fast 132 km",
+      "preset": "fast",
+      "sigma_km": 132,
+      "field_ms_per_frame": 85.08820793695969,
+      "median_cold_speed_kmh": 32.17690047451917,
+      "leads": [
+        {
+          "hours": 1,
+          "mae_frames": 334,
+          "csi_frames": 334,
+          "area_pairs": 171672,
+          "mae_pp": 7.947491709642805,
+          "csi": 0.5692366444584578,
+          "mae_skill": 0.11079551393361031,
+          "csi_difference": 0.07281171060247799
+        },
+        {
+          "hours": 2,
+          "mae_frames": 332,
+          "csi_frames": 332,
+          "area_pairs": 170644,
+          "mae_pp": 13.306200275019666,
+          "csi": 0.4088255363998079,
+          "mae_skill": 0.07062289072206906,
+          "csi_difference": 0.0511821557768502
+        },
+        {
+          "hours": 3,
+          "mae_frames": 330,
+          "csi_frames": 330,
+          "area_pairs": 169616,
+          "mae_pp": 17.43346011598452,
+          "csi": 0.3119818518337044,
+          "mae_skill": 0.04744602172841794,
+          "csi_difference": 0.03377478573890447
+        }
+      ]
+    },
+    {
+      "setting": "medium 0 km",
+      "preset": "medium",
+      "sigma_km": 0,
+      "field_ms_per_frame": 70.59241214414236,
+      "median_cold_speed_kmh": 39.507540535008495,
+      "leads": [
+        {
+          "hours": 1,
+          "mae_frames": 334,
+          "csi_frames": 334,
+          "area_pairs": 171672,
+          "mae_pp": 7.775267359562631,
+          "csi": 0.5778863338246165,
+          "mae_skill": 0.13006482182295975,
+          "csi_difference": 0.08146139996863672
+        },
+        {
+          "hours": 2,
+          "mae_frames": 332,
+          "csi_frames": 332,
+          "area_pairs": 170644,
+          "mae_pp": 13.715096507228518,
+          "csi": 0.3947265169477315,
+          "mae_skill": 0.04206336280046352,
+          "csi_difference": 0.03708313632477378
+        },
+        {
+          "hours": 3,
+          "mae_frames": 330,
+          "csi_frames": 330,
+          "area_pairs": 169616,
+          "mae_pp": 18.2061116776797,
+          "csi": 0.28936669572929946,
+          "mae_skill": 0.005228796116637402,
+          "csi_difference": 0.011159629634499513
+        }
+      ]
+    },
+    {
+      "setting": "medium 33 km",
+      "preset": "medium",
+      "sigma_km": 33,
+      "field_ms_per_frame": 86.29129115016842,
+      "median_cold_speed_kmh": 38.249322936468594,
+      "leads": [
+        {
+          "hours": 1,
+          "mae_frames": 334,
+          "csi_frames": 334,
+          "area_pairs": 171672,
+          "mae_pp": 7.749067273785197,
+          "csi": 0.5804094275058092,
+          "mae_skill": 0.1329962163634978,
+          "csi_difference": 0.08398449364982935
+        },
+        {
+          "hours": 2,
+          "mae_frames": 332,
+          "csi_frames": 332,
+          "area_pairs": 170644,
+          "mae_pp": 13.469759614867574,
+          "csi": 0.4017000057390781,
+          "mae_skill": 0.059199020396847324,
+          "csi_difference": 0.04405662511612041
+        },
+        {
+          "hours": 3,
+          "mae_frames": 330,
+          "csi_frames": 330,
+          "area_pairs": 169616,
+          "mae_pp": 17.983298017607535,
+          "csi": 0.2953078156126229,
+          "mae_skill": 0.01740320308478671,
+          "csi_difference": 0.017100749517822977
+        }
+      ]
+    },
+    {
+      "setting": "medium 66 km",
+      "preset": "medium",
+      "sigma_km": 66,
+      "field_ms_per_frame": 106.06357281682682,
+      "median_cold_speed_kmh": 36.841420637703045,
+      "leads": [
+        {
+          "hours": 1,
+          "mae_frames": 334,
+          "csi_frames": 334,
+          "area_pairs": 171672,
+          "mae_pp": 7.870080316305524,
+          "csi": 0.5761470385490058,
+          "mae_skill": 0.11945668160046574,
+          "csi_difference": 0.07972210469302604
+        },
+        {
+          "hours": 2,
+          "mae_frames": 332,
+          "csi_frames": 332,
+          "area_pairs": 170644,
+          "mae_pp": 13.392047308167841,
+          "csi": 0.40533569543460934,
+          "mae_skill": 0.06462686887824343,
+          "csi_difference": 0.04769231481165165
+        },
+        {
+          "hours": 3,
+          "mae_frames": 330,
+          "csi_frames": 330,
+          "area_pairs": 169616,
+          "mae_pp": 17.800251094465718,
+          "csi": 0.3011194003859542,
+          "mae_skill": 0.027404779001964474,
+          "csi_difference": 0.022912334291154246
+        }
+      ]
+    },
+    {
+      "setting": "medium 132 km",
+      "preset": "medium",
+      "sigma_km": 132,
+      "field_ms_per_frame": 143.03200953151287,
+      "median_cold_speed_kmh": 34.78397713076024,
+      "leads": [
+        {
+          "hours": 1,
+          "mae_frames": 334,
+          "csi_frames": 334,
+          "area_pairs": 171672,
+          "mae_pp": 8.044558708373403,
+          "csi": 0.5675323150699217,
+          "mae_skill": 0.09993518040026117,
+          "csi_difference": 0.07110738121394194
+        },
+        {
+          "hours": 2,
+          "mae_frames": 332,
+          "csi_frames": 332,
+          "area_pairs": 170644,
+          "mae_pp": 13.494997998993398,
+          "csi": 0.40343472900283733,
+          "mae_skill": 0.0574362349286518,
+          "csi_difference": 0.04579134837987964
+        },
+        {
+          "hours": 3,
+          "mae_frames": 330,
+          "csi_frames": 330,
+          "area_pairs": 169616,
+          "mae_pp": 17.70955847183234,
+          "csi": 0.3049720396422737,
+          "mae_skill": 0.03236017041104544,
+          "csi_difference": 0.026764973547473758
+        }
+      ]
+    }
+  ],
+  "best_setting": "fast 33 km",
+  "example_utc": "2025-01-11T19:30:00+00:00",
+  "run_at_utc": "2026-11-19T22:56:50+00:00",
+  "start_utc": "2025-01-08T00:00:00+00:00",
+  "last_frame_utc": "2025-01-14T23:30:00+00:00",
+  "hourly_files": 168,
+  "areas": 514,
+  "crop_shape_lat_lon": [
+    495,
+    1319
+  ],
+  "cold_threshold_k": 233,
+  "opencv_version": "5.1.0",
+  "opencv_threads": 1
+}

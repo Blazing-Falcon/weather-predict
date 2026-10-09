@@ -7,6 +7,7 @@ from nowcast.doctor import doctor
 from nowcast.registry.cli import app as registry_app
 from nowcast.silver.bmkg import parse as bmkg_parse
 from nowcast.sources.bmkg import tick as bmkg_tick
+from nowcast.sources.himawari import tick as himawari_tick
 from nowcast.sources.imerg import backfill as imerg_backfill
 from nowcast.sources.imerg import gaps as imerg_gaps
 from nowcast.sources.imerg import tick as imerg_tick
@@ -32,6 +33,9 @@ mergir_app = typer.Typer(no_args_is_help=True, help="Archive MERGIR cloud featur
 mergir_app.command("backfill")(mergir_backfill)
 mergir_app.command("gaps")(mergir_gaps)
 app.add_typer(mergir_app, name="mergir")
+himawari_app = typer.Typer(no_args_is_help=True, help="Archive live Himawari cloud features.")
+himawari_app.command("tick")(himawari_tick)
+app.add_typer(himawari_app, name="himawari")
 
 
 @app.callback(invoke_without_command=True)

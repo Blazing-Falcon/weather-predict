@@ -6,6 +6,7 @@ from nowcast import __version__
 from nowcast.doctor import doctor
 from nowcast.registry.cli import app as registry_app
 from nowcast.silver.bmkg import parse as bmkg_parse
+from nowcast.sources import gauges
 from nowcast.sources.bmkg import tick as bmkg_tick
 from nowcast.sources.himawari import tick as himawari_tick
 from nowcast.sources.imerg import backfill as imerg_backfill
@@ -36,6 +37,11 @@ app.add_typer(mergir_app, name="mergir")
 himawari_app = typer.Typer(no_args_is_help=True, help="Archive live Himawari cloud features.")
 himawari_app.command("tick")(himawari_tick)
 app.add_typer(himawari_app, name="himawari")
+gauges_app = typer.Typer(no_args_is_help=True, help="Archive historical and live rain gauges.")
+gauges_app.command()(gauges.stations)
+gauges_app.command()(gauges.ghcnh)
+gauges_app.command()(gauges.metar)
+app.add_typer(gauges_app, name="gauges")
 
 
 @app.callback(invoke_without_command=True)

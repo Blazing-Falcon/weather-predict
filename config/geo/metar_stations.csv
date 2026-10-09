@@ -1,0 +1,107 @@
+icao,name,lat,lon
+WAAA,Makassar/Hasanuddin Intl,-5.062,119.554
+WAAB,Bau-Bau Arpt,-5.488,122.57
+WABB,Biak/Kaisiepo Arpt,-1.19,136.108
+WABI,Nabire,-3.389,135.392
+WABN,Kokonao,-4.711,136.435
+WABO,Serui,-1.874,136.239
+WABP,Timika Moses Kilangi,-4.528,136.887
+WABT,Enarotali,-3.926,136.377
+WADD,Bali/Rai Intl,-8.748,115.167
+WADL,Lombok Intl,-8.757,116.277
+WADY,Banyuwangi Arpt,-8.31015,114.3401
+WAFD,Bua Arpt,-3.084,120.245
+WAFJ,Mamuju/Tampa Padang Arpt,-2.589,119.029
+WAFM,Andi Jemma Arpt,-2.554,120.325
+WAFO,Morowali Arpt,-2.202,121.662
+WAHI,Yogyakarta Intl,-7.9041,110.0575
+WAHQ,Surakarta/Soemarmo Intl,-7.514,110.751
+WAHS,Semarang/Uani Arpt,-6.973,110.375
+WAJI,Sarmi,-1.871,138.752
+WAJJ,Jayapura/Sentani Arpt,-2.573,140.514
+WAJW,Wamena,-4.099,138.953
+WAKK,Merauke/Mopah Arpt,-8.52,140.417
+WAKT,Tanah Merah,-6.097,140.304
+WALL,Sepinggan Intl,-1.268,116.894
+WALR,Tarakan Juwata Intl,3.327,117.566
+WALS,Samarinda/Pranoto Intl,-0.371,117.255
+WAMA,Galela,1.82,127.83
+WAMG,Gorontalo Arpt,0.637,122.85
+WAMH,Tahuna/Naha Arpt,3.683,125.528
+WAMI,Toli-Toli/Lalos Arpt,1.123,120.796
+WAML,Palu,-0.677,119.758
+WAMM,Manado/Ratulangi Intl,1.541,124.926
+WAMN,Melonguane Arpt,4.006,126.675
+WAMP,Poso,-1.383,120.733
+WAMT,Ternate/Babullah Arpt,0.831,127.381
+WAMW,Luwuk Arpt,-1.039,122.772
+WAOO,Banjarmasin/Syamsudin Noor Arpt,-3.44,114.759
+WAPA,Amahai,-3.35,128.883
+WAPC,Central Maluku/Bandaneira Arpt,-4.522,129.905
+WAPH,Labuha,-1.617,124.55
+WAPI,Saumlaki,-7.989,131.306
+WAPN,Sanana,-2.097,125.964
+WAPP,Ambon/Pattimura Arpt,-3.71,128.089
+WAPR,Namlea,-3.25,127.083
+WAPS,Saumlaki/Mathilda Batlayeri Arpt,-7.848,131.335
+WAQA,Nunukan Arpt,4.137,117.667
+WAQD,Tanjung Harapan Arpt,2.836,117.374
+WAQJ,Yuvai Semaring Arpt,3.903,115.692
+WAQQ,Juwata Intl,3.327,117.568
+WAQT,Kalimarau Arpt,2.155,117.432
+WARQ,Surakarta/Sumarmo Intl,-7.516,110.757
+WARR,Surabaya/Juanda Intl,-7.38,112.787
+WARS,Semarang/Uani Arpt,-6.973,110.375
+WASF,Fak-Fak,-2.92,132.265
+WASK,Kaimana Arpt,-3.65,133.694
+WASR,Manokwari Arpt,-0.892,134.049
+WASS,Sorong,-0.926,131.121
+WATT,Kupang/El Tari Arpt,-10.172,123.671
+WAWB,Betoambari Arpt,-5.487,122.569
+WAWH,Aroeppala Arpt,-6.177,120.437
+WAWP,Kolaka/Sangia Nibandera Arpt,-4.345,121.522
+WAWS,Soroako Arpt,-2.529,121.357
+WAWW,Kendari Arpt,-4.082,122.418
+WAYY,Timika/Mozes Kilangin Intl,-4.528,136.887
+WIAA,Sabang,5.875,95.335
+WIAG,Menggala,-4.612,105.23
+WIAM,Tasikmalaya / C,-7.33,108.25
+WIAR,Madiun,-7.617,111.517
+WIAS,Malang,-7.967,112.7
+WIBB,Pakanbaru/Kasim Arpt,0.461,101.445
+WIDD,Batam/Hang Nadim,1.121,104.119
+WIDN,Tanjung Pinang Arpt,0.923,104.532
+WIEE,Padang/Minangkabau Intl,-0.783,100.283
+WIHH,Jakarta/Perdanakusum,-6.267,106.891
+WIHK,Kalijati,-6.55,107.667
+WIHS,Semarang/Yani Intl,-6.973,110.375
+WIIA,Curug/Budiarto Arpt,-6.293,106.573
+WIIB,Bandung,-6.901,107.576
+WIIH,Halim Intl,-6.25,106.9
+WIII,Jakarta/Hatta Intl,-6.125,106.659
+WIIJ,Jogyakarta,-7.788,110.432
+WIIL,Cilacap,-7.73,109.02
+WIKD,Tanjungpandan,-2.75,107.75
+WIKK,Pangkalpinang,-2.17,106.13
+WIKS,Singkep,-0.479,104.579
+WILL,Bandar Lampung Intl,-5.242,105.179
+WIMB,Gunung Sitoli/Binaka,1.166,97.705
+WIMG,Padang,-0.875,100.352
+WIMM,Medan/Kualanamu Intl,3.636,98.874
+WIMN,Silangit Arpt,2.25973,98.991898
+WIMS,Sibolga/Tobang Arpt,1.556,98.889
+WIOI,Singkawang II,1.083,109.694
+WIOK,Ketapang,-1.85,109.967
+WION,Ranai,3.913,108.388
+WIOO,Pontianak/Supadio Arpt,-0.151,109.404
+WIOS,Sintang,0.117,111.533
+WIPA,Jambi,-1.638,103.644
+WIPB,Lubuklinggau Arpt,-3.283,102.917
+WIPH,Kerinci,-2.767,101.367
+WIPL,Bengkulu,-3.883,102.333
+WIPP,Palembang/Badaruddin Arpt,-2.898,104.7
+WIPR,Rengat/Japura Arpt,-0.353,102.335
+WIPT,Padang/Minangkabau Intl,-0.794,100.289
+WIPY,Atung Bungsu Arpt,-4.025,103.378
+WITM,Lhokseumawe/Saleh Arpt,5.227,96.95
+WITT,Banda Aceh,5.524,95.42

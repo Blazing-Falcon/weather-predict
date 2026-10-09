@@ -1,0 +1,212 @@
+IDA00749308   1.0830  131.2670    2.0    PULAU FANI                                   ID
+IDA00749402  -0.9500  134.8170    5.0    KAMERI                                       ID
+IDA00749403  -0.5000  132.0830    0.0    SANSAPOR                                     ID
+IDA00749404  -0.3500  132.1830    4.0    MAR NORTH                                    ID
+IDA00749539  -1.2330  136.2000   23.0    SERUMI                                       ID
+IDA00960390   3.3670   99.1170   90.0    TEBINGTINGGI                                 ID
+IDA00966510  -2.5170  112.9500   27.0    SAMPIT/HAJI HASAN                            ID
+IDA00967550  -6.5500  106.9000  171.0    BOGOR/ATANG SANJAYA                          ID
+IDA00967830  -6.8830  107.6000  791.0    BANDUNG                                      ID
+IDA00971840  -5.1830  119.4830   15.0    PANAKUKANG                                   ID
+IDI0000MASA  -2.5667  120.3167   50.0    ANDI JEMMA                                   ID
+IDI0000WADA  -8.5607  116.0947   15.8    MATARAM/SELAPARANG AIRPORT                   ID
+IDI0000WADD  -8.7482  115.1672    4.3    BALI INTL                                    ID
+IDI0000WAHQ  -7.5000  110.7500  127.4    ADISUMARMO INTL                              ID
+IDI0000WALR   3.3267  117.5656    6.1    JUWATA                                       ID
+IDI0000WAML  -0.9185  119.9096   86.6    MUTIARA                                      ID
+IDI0000WARJ  -7.7882  110.4318  106.7    ADI SUTJIPTO                                 ID
+IDI0000WARR  -7.3798  112.7869    2.7    JUANDA                                       ID
+IDI0000WATL  -8.2667  123.0000    3.0    GEWAYENTANA                                  ID
+IDI0000WATT -10.1716  123.6711  102.1    EL TARI                                      ID
+IDI0000WAYY  -4.5297  136.8874   31.7    MOZES KILANGIN ARPT                          ID
+IDI0000WIAG  -4.4500  105.1833   19.0    MENGGALA/ASTRA KSET                          ID
+IDI0000WIAM  -7.3461  108.2466  359.0    CIBEUREUM                                    ID
+IDI0000WIAR  -7.6158  111.4339  113.0    ISWAHYUDI                                    ID
+IDI0000WICC  -6.9006  107.5763  742.5    HUSEIN SASTRANEGARA                          ID
+IDI0000WIDD   1.1210  104.1188   38.4    HANG NADIM                                   ID
+IDI0000WIDN   0.9227  104.5323   15.8    KIJANG                                       ID
+IDI0000WIEE  -0.7870  100.2808    5.5    MINANGKABAU INTL                             ID
+IDI0000WIHH  -6.2666  106.8911   25.6    HALIM PERDANAKUSUMA INTL                     ID
+IDI0000WIIH  -6.2666  106.8911   26.0    HALIM PERDANAKUSUMA INTL                     ID
+IDI0000WIIK  -6.5500  107.6667  110.0    KALIJATI                                     ID
+IDI0000WIIS  -6.9731  110.3755    3.0    ACHMAD YANI                                  ID
+IDI0000WIOI   1.0833  109.6667   38.0    SINGKAWANG II                                ID
+IDI0000WIPB  -3.2833  102.9167    0.0    MINANGKABAU INTL                             ID
+IDI0000WIPK  -2.1622  106.1391   33.2    DEPATI AMIR                                  ID
+IDI0000WPOC  -9.2000  124.3667    5.0    OE-CUSSE/TIMOR ISL                           ID
+IDI0000WRBC  -3.4127  115.9956    3.0    BATU LICIN                                   ID
+IDI0000WRLK   2.1555  117.4323   18.0    KALIMARU                                     ID
+IDI0000WRLR   3.3267  117.5656    6.0    JUWATA                                       ID
+IDM00097428   1.1330  127.5000   16.0    SAHU SOUTHEAST                         97428 ID
+IDM00097500  -0.8670  131.2670   27.0    SORONG EAST                            97500 ID
+IDN00200602 -12.2330  123.0170    3.0    ASHMORE REEF                                 ID
+IDN00200728 -14.0480  121.7600    3.0    SCOTT REEF                                   ID
+IDU096001-1   5.8700   95.3200  126.0    SABANG/CUTBAU                                ID
+IDU096009-1   5.2300   97.2000   87.0    LHOKSEUMAWE/MALIKUS                          ID
+IDU096011-1   5.5200   95.4200   21.0    BANDAACEH/BLANGBI                            ID
+IDU096015-1   4.2500   96.1200 -999.0    MEULABOH/CUTNYAKD                            ID
+IDU096033-1   3.8000   98.7000    3.0    MEDAN/BELAWAN                          96033 ID
+IDU096035-1   3.5700   98.6800   25.0    MEDAN/POLONIA                                ID
+IDU096073-1   1.5500   98.8800    3.0    SIBOLGA/PINANGSORI                           ID
+IDU096075-1   1.5000   97.6300    6.0    GUNUNGSITOLI/BINAK                           ID
+IDU096109-1   0.4700  101.4500   31.0    PEKANBARU/SIMPANGT                           ID
+IDU096145-1   3.2000  106.2500    3.0    TAREMPA                                96145 ID
+IDU096147-1   3.9500  108.3800    2.0    RANAI                                        ID
+IDU096163-1  -0.8800  100.3500    3.0    PADANG/TABING                                ID
+IDU096171-1  -0.3300  102.3200   46.0    RENGAT/JAPURA                                ID
+IDU096195-1  -1.6300  103.6500   25.0    JAMBI/SULTANTAHA                             ID
+IDU096207-1  -2.7700  101.3700  782.0    KERINCI/DEPATIPARB                           ID
+IDU096221-1  -2.9000  104.7000   10.0    PALEMBANG/ST.M.BA                            ID
+IDU096249-1  -2.7500  107.7500   44.0    TANJUNGPANDAN/BULU                           ID
+IDU096295-1  -5.1000  105.1800   96.0    TANJUNGKARANG/RADI                           ID
+IDU096505-1   3.7300  115.6800 -999.0    LONGBAWAN/JUVAISE                            ID
+IDU096525-1   2.8500  117.3300   50.0    TANJUNGSELOR/TANJU                           ID
+IDU096535-1   1.7700  109.3000   15.0    PALOH                                  96535 ID
+IDU096557-1  -0.3500  111.7800   37.0    NANGAPINOH                             96557 ID
+IDU096559-1   0.1200  111.5300   30.0    SINTANG                                      ID
+IDU096565-1   0.8800  112.9300 -999.0    PUTUSSIBAU/PAGSUMA                           ID
+IDU096581-1  -0.1500  109.4000    3.0    PONTIANAK/SUPADIO                            ID
+IDU096595-1  -0.9500  114.9000   60.0    MUARATEWEH/BERINGI                           ID
+IDU096607-1  -0.6200  117.1500  230.0    SAMARINDA/TEMINDUNG                          ID
+IDU096615-1  -1.8500  109.9700    9.0    KETAPANG/RAHADIUSM                           ID
+IDU096633-1  -1.2700  116.9000    3.0    BALIKPAPAN/SEPINGGA                          ID
+IDU096645-1  -2.7000  111.7000   25.0    PANGKALANBUN/ISKAN                           ID
+IDU096655-1  -1.0000  114.0000   27.0    PALANGKARAYA/TJILI                           ID
+IDU096685-1  -3.4300  114.7500   20.0    BANJARMASIN/SYAMSUD                          ID
+IDU096695-1  -3.4000  116.2200   18.0    KOTABARU/STAGEN                              ID
+IDU096737-1  -6.1200  106.1300   40.0    SERANG                                 96737 ID
+IDU096739-1  -6.2300  106.6500   46.0    CURUG/BUDIARTO                               ID
+IDU096741-1  -6.1000  106.8700    2.0    JAKARTA/TANJUNGPRI                     96741 ID
+IDU096745-1  -6.1800  106.8300    8.0    JAKARTA/OBSERVATORY                    96745 ID
+IDU096749-1  -6.1200  106.6500    8.0    JAKARTA/SOEKARNO-HA                          ID
+IDU096751-1  -6.7000  106.9300 -999.0    BOGOR/CITEKO                           96751 ID
+IDU096797-1  -6.8500  109.1500   10.0    TEGAL                                  96797 ID
+IDU096805-1  -7.7300  109.0200    6.0    CILACAP                                96805 ID
+IDU096925-1  -5.8500  112.6300    3.0    SANGKAPURA/BAWEAN                      96925 ID
+IDU096933-1  -7.2200  112.7200    3.0    SURABAYA/PERAKI                              ID
+IDU096937-1  -7.2200  112.7200    3.0    SURABAYA/PERAKII                             ID
+IDU096973-1  -7.0500  113.9700    3.0    KALIANGET/MADURAI                      96973 ID
+IDU096987-1  -8.2200  114.3800    5.0    BANYUWANGI                             96987 ID
+IDU097008-1   3.5800  125.4700   38.0    NAHA/TAHUNA                                  ID
+IDU097014-1   1.5300  124.9200   80.0    MENADO/SAMRATULAN                            ID
+IDU097016-1   1.4300  125.1800    3.0    BITUNG                                 97016 ID
+IDU097028-1   1.0200  120.8000    2.0    TOLI-TOLI/LALOS                              ID
+IDU097048-1   0.5200  123.0700    2.0    GORONTALO/JALALUDDI                          ID
+IDU097086-1  -0.9000  122.7800    2.0    LUWUK/BUBUNG                                 ID
+IDU097096-1  -1.3800  120.7300    2.0    POSO/KASIGUNCU                               ID
+IDU097180-1  -5.0700  119.5500   14.0    UJUNGPANDANG/HASAN                           ID
+IDU097182-1  -5.0700  119.5500 -999.0    UJANGPANDANG/PAOTE                           ID
+IDU097192-1  -5.4700  122.6200    2.0    BAU-BAU/BETOAMBARI                           ID
+IDU097260-1  -8.4300  117.4200    3.0    SUMBAWABESAR/BRANG                           ID
+IDU097270-1  -8.5500  118.7000    2.0    BIMA/M.SALAHUDDIN                            ID
+IDU097284-1  -8.6300  120.4500 1170.0    RUTENG/SATARTACIK                      97284 ID
+IDU097300-1  -8.6300  122.2500    3.0    MAUMERE/WAIOTI                               ID
+IDU097310-1  -8.2700  122.9700 -999.0    LARANTUKA/GEWAYANTA                          ID
+IDU097320-1  -8.2200  124.5700   12.0    ALOR/MALIKALAHAHI                            ID
+IDU097380-1 -10.5000  121.8300   26.0    SABU/TARDAMU                                 ID
+IDU097406-1   1.8200  127.8300 -999.0    GALELA/GAMARMALAMU                           ID
+IDU097430-1   0.7700  127.3700   23.0    TERNATE/BABULLAH                             ID
+IDU097460-1  -0.6300  127.5000    3.0    LABUHA/OESMANSADIK                           ID
+IDU097502-1  -0.9300  131.1200    3.0    SORONG/JEFMAN                                ID
+IDU097530-1  -0.8800  134.0500    3.0    MANOKWARI/RENDANI                            ID
+IDU097560-1  -1.1800  136.1200   11.0    BIAK/FRANSKAISIEPO                           ID
+IDU097570-1  -1.8700  136.2300    3.0    SERUI/SUJARWOCONDR                           ID
+IDU097580-1  -1.8300  138.7200    3.0    SARMI/MARARENA                               ID
+IDU097682-1  -3.3300  135.5000    3.0    NABIRE                                       ID
+IDU097686-1  -4.0700  138.9500 1660.0    WAMENA                                       ID
+IDU097690-1  -2.5700  140.4800   99.0    JAYAPURA/SENTANI                             ID
+IDU097698-1  -2.3700  140.7200    3.0    JAYAPURA/DOKII                         97698 ID
+IDU097700-1  -3.2300  127.0800   20.0    NAMLEA                                       ID
+IDU097722-1  -3.3500  128.8800   10.0    AMAHAI                                       ID
+IDU097724-1  -3.7000  128.0800   12.0    AMBON/PATTIMURA                              ID
+IDU097748-1  -3.8000  130.8300    3.0    GESER                                  97748 ID
+IDU097760-1  -3.6700  133.7500    3.0    KAIMANA/UTAROM                               ID
+IDU097790-1  -4.5300  129.9000    4.0    NEIRA                                  97790 ID
+IDU097796-1  -5.0000  137.4500    3.0    TIMIKA                                       ID
+IDU097810-1  -5.6800  132.7500   12.0    TUAL/DUMATUBUN                         97810 ID
+IDU097876-1  -6.1000  140.3000   16.0    TANAHMERAH                                   ID
+IDU097900-1  -7.9800  131.3000   24.0    SAUMLAKI/OLILIT                              ID
+IDU097980-1  -8.4700  140.3800    3.0    MERAUKE/MOPAH                                ID
+IDUIDN00100   1.4200  127.5200   60.0    KALI_PITOE                                   ID
+IDW00080309  -1.2667  136.3833    1.2 AS BIAK IS NF                                   ID
+IDU00097690  -2.5700  140.4800   99.0    SENTANI WEST IRIAN                           ID
+IDU00097980  -8.4700  140.3800    3.0    MERAUKE WEST IRIAN (MOPAH)                   ID
+IDU00097876  -6.0800  140.3200   15.0    TANAHMERAH WEST IRIAN                        ID
+IDU00097686  -4.0700  138.9500 1659.0    WAMENA WEST IRIAN                            ID
+IDU00097780  -3.9200  136.3700 1769.0    ENAROTALI WEST IRIAN                         ID
+IDU00097560  -1.1800  136.1200   10.0    BIAK WEST IRIAN                              ID
+IDU00097530  -0.8800  134.0500    3.0    MANOKWARI WEST IRIAN (RENDANI)               ID
+IDU00097630  -2.9000  132.2500   92.0    FAKFAK WEST IRIAN                            ID
+IDU00097900  -7.9800  131.3000   24.0    SAUMLAKI JAMDENA ISLAND                      ID
+IDU00097404   2.0500  128.3200   15.0    MOROTAI MOLUCCA IS (PITU)                    ID
+IDU00097724  -3.7000  128.0800   12.0    AMBON CERAM I MOLUCCAS                       ID
+IDU00097408   1.7200  128.0000    2.0    TOBELO HALMAHERA                             ID
+IDU00097428   1.1300  127.5000   15.0    DJAILOLO HALMAHERA (KURIPASAI)               ID
+IDU00097460  -0.6300  127.4800   54.0    LABUHA BATJAN                                ID
+IDU00097014   1.5300  124.9200   80.0    MANADO CELEBES (MAPANGET)                    ID
+IDU00097320  -8.2200  124.5200   17.0    KALABAHI ALOR ISLAND                         ID
+IDU00097372 -10.1700  123.6700  108.0    KUPANG TIMOR (PENFUI)                        ID
+IDU00097048   0.5200  123.0700    2.0    GORONTALO CELEBES                            ID
+IDU00097378 -10.7300  123.0700    0.0    BAA ROTI ISLAND                              ID
+IDU00097086  -0.9000  122.7800    2.0    LUWUK CELEBES                                ID
+IDU00097146  -4.1000  122.4300   49.0    KENDARI CELEBES (WOLTERMONGINS               ID
+IDU00097028   1.0200  120.8000    2.0    TOLITOLI CELEBES                             ID
+IDU00097096  -1.3800  120.7300    2.0    POSO CELEBES                                 ID
+IDU00097072  -0.6800  119.7300    6.0    PALU CELEBES                                 ID
+IDU00097180  -5.0700  119.5500   14.0    MAKASAR CELEBES (HASANUDDIN)                 ID
+IDU00096509   3.3300  117.5700    6.0    TARAKAN BORNEO (DJUWATA)                     ID
+IDU00096695  -3.4000  116.2200   17.0    KOTABARU LAUT I                              ID
+IDU00097220  -8.1200  115.1000   39.0    SINGARADJA BALI                              ID
+IDU00096595  -0.9300  114.8800   46.0    MUARATEWE BORNEO                             ID
+IDU00096685  -3.4500  114.7500   20.0    BANDJARMASIN BORNEO (ULIN)                   ID
+IDU00096987  -8.2200  114.3800    4.0    BANJUWANGI JAVA                              ID
+IDU00096935  -7.3700  112.7700    3.0    SURABAJA JAVA (DJUANDA)                      ID
+IDU00096947  -7.9700  112.7000  526.0    MALANG JAVA (ABDURACHMAN SALEH               ID
+IDU00096645  -2.7000  111.7000   24.0    PANGKALANBUUN BORNEO                         ID
+IDU00096881  -7.6200  111.5200  109.0    MADIUN JAVA (ISWAHJUDI)                      ID
+IDU00096559   0.0200  111.4800   47.0    SINTANG BORNEO                               ID
+IDU00096845  -7.8700  110.9200  103.0    SURAKARTA JAVA (PANASAN)                     ID
+IDU00096853  -7.7800  110.4300  106.0    DJOKJAKARTA JAVA (ADISUTJIPTO)               ID
+IDU00096533   1.0800  109.6700   38.0    SINGKAWANG II BORNEO                         ID
+IDU00096581  -0.0200  109.3800    0.0    PONTIANAK BORNEO (SUNGAI DURIA               ID
+IDU00096583   0.0000  109.3300    3.0    PONTIANAK BORNEO                             ID
+IDU00096791  -6.7500  108.2700   49.0    DJATIBARANG JAVA                             ID
+IDU00096801  -7.3300  108.2500  335.0    TASIKMALAJA JAVA (TJIBEUREUM)                ID
+IDU00096249  -2.7500  107.7500   44.0    TANDJUNGPANDAN BILLITON I (BUL               ID
+IDU00096773  -6.5500  107.6700  110.0    KALIDJATI JAVA                               ID
+IDU00096781  -6.9000  107.5800  740.0    BANDUNG JAVA (HUSEIN)                        ID
+IDU00096747  -6.2500  106.9000   29.0    DJAKARTA JAVA (HALIM)                        ID
+IDU00096755  -6.5500  106.9000  170.0    BOGOR JAVA (SEMPLAK)                         ID
+IDU00096743  -6.1500  106.8500    4.0    DJAKARTA JAVA (KEMAJORAN)                    ID
+IDU00096739  -6.2300  106.6500   45.0    TANGERANG JAVA (TJURUG)                      ID
+IDU00096237  -2.1700  106.1300   33.0    PANGKALPINANG BANGKA ISLAND                  ID
+IDU00096273  -4.4500  105.1800   18.0    MENGGALA SUMATRA (ASTRA KSETRA               ID
+IDU00096221  -2.9000  104.7000   10.0    PALEMBANG SUMATRA (TALANGBETUT               ID
+IDU00096179  -0.4800  104.5800   31.0    SINGKEP SINGKEP I (DABO)                     ID
+IDU00096091   0.9200  104.5300   17.0    TANDJUNGPINANG SUMATRA (KIDJAN               ID
+IDU00096195  -1.6300  103.6500   24.0    DJAMBI SUMATRA (PAALMERAH)                   ID
+IDU00096171  -0.4300  102.4500   45.0    RENGAT SUMATRA (DJAPURA)                     ID
+IDU00096253  -3.8700  102.3300   15.0    BANGKULU SUMATRA (PADANGKEMILI               ID
+IDU00096109   0.4700  101.4500   31.0    PAKANBARU SUMATRA (SIMPANGTIGA               ID
+IDU00096073   1.5500   98.8800    3.0    SIBOLGA SUMATRA (PINANGSORE)                 ID
+IDU00096011   5.5200   95.4200   21.0    KUTARADJA SUMATRA (BLANGBINTAN               ID
+IDU00096001   5.8700   95.3200  125.0    SABANG SUMATRA                               ID
+IDU00097385  -9.2000  124.3800    2.0    OCUSSI PORTUGUESE TIMOR                      ID
+IDU00097796  -4.7200  136.4300    3.0    KOKONAU WET IRIAN (TIMUKA)                   ID
+IDU00097450   0.8300  134.3000    3.0    MAPIA ISLAND WEST IRIAN                      ID
+IDU00097760  -3.6700  133.7500    3.0    KAIMANA WEST IRIAN (UTAROM)                  ID
+IDU00097810  -5.6800  132.7500   11.0    LANGGUR KAI ISLANDS                          ID
+IDU00097500  -0.8700  131.2700   27.0    SORONG WEST IRIAN                            ID
+IDU00097502  -0.9300  131.1200    3.0    JEFNAN ROMBOMBO I WEST IRIAN                 ID
+IDU00097430   0.7800  127.3800    4.0    TERNATE MOLUCCA ISLANDS                      ID
+IDU00097600  -2.0800  126.0000    2.0    SANANA SANANA ISLAND                         ID
+IDU00097008   3.5800  125.4700   38.0    TAHUNA SANGI ISLAND                          ID
+IDU00097010   2.6700  125.3300    0.0    ULU SIAU ISLAND SANGE IS                     ID
+IDU00097340  -9.6700  120.3300   11.0    WAINGAPU SUMBA (MAU HAU)                     ID
+IDU00097260  -8.4300  117.4200    3.0    SUMBAWA-BESAR SUMBAWA                        ID
+IDU00096633  -1.2700  116.9000    3.0    BALIKPAPAN BORNEO (SEPINGGAN)                ID
+IDU00097240  -8.5700  116.0700    3.0    MATARAM LOMBOK (RAMBIGA) (AMPE               ID
+IDU00097230  -8.7500  115.1700    0.0    DENPASAR BALI (TUBAN)                        ID
+IDU00096933  -7.2200  112.7200    3.0    SURABAJA JAVA (PERAK)                        ID
+IDU00096839  -6.9800  110.3800    3.0    SEMARANG JAVA (KALIBANTENG)                  ID
+IDU00096805  -7.7300  109.0200    6.0    TJILATJAP JAVA                               ID

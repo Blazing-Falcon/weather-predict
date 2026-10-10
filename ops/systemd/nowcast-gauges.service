@@ -1,0 +1,10 @@
+[Unit]
+Description=nowcast live METAR gauge archiver
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=@REPO@
+Environment=TZ=UTC
+ExecStart=@UV@ run --frozen nowcast gauges metar
+TimeoutStartSec=10min

@@ -5,6 +5,7 @@ import typer
 from nowcast import __version__
 from nowcast.doctor import doctor
 from nowcast.registry.cli import app as registry_app
+from nowcast.retention import disk, retention
 from nowcast.silver.bmkg import parse as bmkg_parse
 from nowcast.sources import gauges
 from nowcast.sources.bmkg import tick as bmkg_tick
@@ -20,6 +21,8 @@ app = typer.Typer(
     help="Rain nowcast for every kab/kota in Indonesia.",
 )
 app.command()(doctor)
+app.command()(retention)
+app.command()(disk)
 app.add_typer(registry_app, name="registry")
 bmkg_app = typer.Typer(no_args_is_help=True, help="Archive live BMKG forecasts.")
 bmkg_app.command("tick")(bmkg_tick)

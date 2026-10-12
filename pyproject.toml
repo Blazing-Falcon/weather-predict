@@ -3,6 +3,8 @@ name = "nowcast"
 version = "0.1.0"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    "dagster==1.13.31",
+    "dagster-webserver==1.13.31",
     "geopandas==1.2.0",
     "h5py==3.16.0",
     "httpx==0.28.1",

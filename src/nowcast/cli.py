@@ -5,6 +5,7 @@ import typer
 from nowcast import __version__
 from nowcast.doctor import doctor
 from nowcast.features import build, climatology
+from nowcast.model.train import train
 from nowcast.registry.cli import app as registry_app
 from nowcast.retention import disk, retention
 from nowcast.silver.bmkg import parse as bmkg_parse
@@ -52,6 +53,9 @@ features_app = typer.Typer(no_args_is_help=True, help="Build issue-time features
 features_app.command("build")(build.build)
 features_app.command("climatology")(climatology.climatology)
 app.add_typer(features_app, name="features")
+model_app = typer.Typer(no_args_is_help=True, help="Train and evaluate nowcast models.")
+model_app.command("train")(train)
+app.add_typer(model_app, name="model")
 
 
 @app.callback(invoke_without_command=True)

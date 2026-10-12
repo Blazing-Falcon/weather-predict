@@ -287,7 +287,7 @@ def _previous_frame(
     return target, tb[1]
 
 
-def _backfill(start: datetime, end: datetime, force: bool, state_path: Path) -> None:
+def _backfill(start: datetime, end: datetime, force: bool, state_path: Path) -> dict:
     state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else {}
     carry = state_path.with_name("mergir_last_frame.npz")
     logger = get_logger(__name__)
@@ -295,6 +295,7 @@ def _backfill(start: datetime, end: datetime, force: bool, state_path: Path) -> 
     grid = mergir_grid()
     parallel = _parallel()
     zonal = motion = None
+    reports = {}
     month = start
     while month <= end:
         following = (month + timedelta(days=32)).replace(day=1)
@@ -345,6 +346,11 @@ def _backfill(start: datetime, end: datetime, force: bool, state_path: Path) -> 
                 "elapsed_seconds": finished - started,
             }
             _save_state(state_path, state)
+            manifest = pq.ParquetFile(silver / "_manifest-mergir.parquet").read(columns=["bytes"])
+            reports[label] = {
+                "slots": stats["frames"], "bronze_bytes": sum(manifest["bytes"].to_pylist()),
+                "rows": stats["frames"] * len(zonal.area_ids), "silver_bytes": stats["silver_bytes"],
+            }
             logger.info(
                 "MERGIR %s frames=%d/%d cold_speed_kmh_median=%s "
                 "download=%.2fs processing=%.2fs elapsed=%.2fs",
@@ -354,13 +360,14 @@ def _backfill(start: datetime, end: datetime, force: bool, state_path: Path) -> 
         for crop in bronze.glob("*.nc4*"):
             crop.unlink()
         month = following
+    return reports
 
 
 def backfill(
     start: Annotated[str, typer.Option(help="First UTC month (YYYY-MM).")],
     end: Annotated[str, typer.Option(help="Last UTC month (YYYY-MM), inclusive.")],
     force: Annotated[bool, typer.Option(help="Process completed months again.")] = False,
-) -> None:
+) -> dict:
     try:
         if not all(re.fullmatch(r"[0-9]{4}-[0-9]{2}", month) for month in (start, end)):
             raise ValueError("Month bounds must use YYYY-MM")
@@ -372,7 +379,7 @@ def backfill(
         state.mkdir(parents=True, exist_ok=True)
         with (state / "mergir.lock").open("a") as lock:
             flock(lock, LOCK_EX)
-            _backfill(first, last, force, state / "mergir_backfill.json")
+            return _backfill(first, last, force, state / "mergir_backfill.json")
     except (OSError, KeyError, ValueError, RuntimeError, httpx.HTTPError) as error:
         typer.echo(redact(str(error)), err=True)
         raise typer.Exit(1) from None

@@ -28,3 +28,17 @@ def granules(collection: str, start: datetime, end: datetime) -> list[dict]:
             if header not in response.headers:
                 return results
             headers = {header: response.headers[header]}
+
+
+def latest_granule(collection: str, start: datetime, end: datetime) -> dict | None:
+    bounds = [dt.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ") for dt in (start, end)]
+    params = {
+        "collection_concept_id": collection,
+        "temporal": ",".join(bounds),
+        "sort_key": "-start_date",
+        "page_size": 1,
+    }
+    with http.client() as client:
+        response = client.get(config.settings()["cmr"]["granules"], params=params).raise_for_status()
+        entries = response.json()["feed"]["entry"]
+    return entries[0] if entries else None

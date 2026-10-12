@@ -173,7 +173,8 @@ def merge(path: Path, rows: list[dict]) -> None:
         os.close(directory)
 
 
-def publish(source: str, rows: list[dict], requested: int, downloaded: int) -> None:
+def publish(source: str, rows: list[dict], requested: int, downloaded: int) -> dict:
+    reports = {}
     if rows:
         assign_areas(rows)
         partitions = defaultdict(list)
@@ -183,9 +184,17 @@ def publish(source: str, rows: list[dict], requested: int, downloaded: int) -> N
 
         root = paths.zone("silver") / "gauge_obs"
         for (year, month), batch in partitions.items():
-            merge(
-                root / f"year={year:04d}" / f"month={month:02d}" / f"part-{source}.parquet", batch
-            )
+            part = root / f"year={year:04d}" / f"month={month:02d}" / f"part-{source}.parquet"
+            merge(part, batch)
+            reports[f"{year:04d}-{month:02d}"] = {
+                "rows": len(batch),
+                "silver_bytes": part.stat().st_size,
+            }
+            if source == "metar":
+                newest = max(row["obs_time"] for row in batch)
+                reports[f"{year:04d}-{month:02d}"]["latency_min"] = (
+                    datetime.now(UTC) - newest
+                ).total_seconds() / 60
 
     get_logger(__name__).info(
         "%s requested_stations=%d stations=%d rows=%d rain_share=%.4f%% "
@@ -199,6 +208,7 @@ def publish(source: str, rows: list[dict], requested: int, downloaded: int) -> N
         sum(r["precip_mm"] is not None for r in rows),
         downloaded,
     )
+    return reports
 
 
 def stations() -> None:
@@ -244,7 +254,7 @@ def download_ghcnh(
 def ghcnh(
     year: Annotated[int, typer.Option(min=1, max=9999)],
     month: Annotated[int | None, typer.Option(min=1, max=12)] = None,
-) -> None:
+) -> dict:
     """Import a UTC year or month of GHCNh observations."""
     stations = [
         line.split()[0]
@@ -273,22 +283,29 @@ def ghcnh(
                     downloaded += size
                     rows.extend(parse_ghcnh(path, year, month))
                     completed.append(path)
-        publish("ghcnh", rows, len(stations), downloaded)
+        reports = publish("ghcnh", rows, len(stations), downloaded)
         for path in completed:
             path.unlink()
         if failures:
             raise typer.Exit(1)
+        return {
+            f"{year:04d}-{month:02d}": {
+                **reports.get(f"{year:04d}-{month:02d}", {}),
+                "reports": len(rows), "bronze_bytes": downloaded,
+            }
+        } if month is not None else reports
     finally:
         os.close(directory)
 
 
-def metar() -> None:
+def metar() -> dict:
     """Archive the latest three hours of Indonesian METARs."""
     with (GEO / METAR_STATIONS).open(encoding="utf-8", newline="") as file:
         stations = [row["icao"] for row in csv.DictReader(file)]
 
     rows = {}
     downloaded = 0
+    reports = {}
     with http.client() as client:
         for batch in batched(stations, 100):
             response = http.get(
@@ -306,6 +323,15 @@ def metar() -> None:
             temp.write_bytes(response.content)
             temp.replace(path)
             downloaded += response.num_bytes_downloaded
-            for row in parse_metar(response.json()):
+            parsed = parse_metar(response.json())
+            report = reports.setdefault(f"{fetched:%Y-%m}", {"reports": 0, "bronze_bytes": 0})
+            report["reports"] += len(parsed)
+            report["bronze_bytes"] += path.stat().st_size
+            if parsed:
+                newest = max(row["obs_time"] for row in parsed)
+                report["bronze_latency_min"] = (fetched - newest).total_seconds() / 60
+            for row in parsed:
                 rows[row["station_id"], row["obs_time"]] = row
-    publish("metar", list(rows.values()), len(stations), downloaded)
+    for month, summary in publish("metar", list(rows.values()), len(stations), downloaded).items():
+        reports.setdefault(month, {}).update(summary)
+    return reports

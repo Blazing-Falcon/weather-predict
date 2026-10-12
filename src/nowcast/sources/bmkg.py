@@ -110,7 +110,7 @@ def sweep(
     state: dict,
     state_path: Path,
     directory: Path,
-) -> tuple[int, int]:
+) -> tuple[int, int, int, int]:
     runs = state["runs"]
     progress = runs[run]
     done = set(progress["done"])
@@ -118,12 +118,15 @@ def sweep(
     progress["last_sweep"] = utc_now()
     output = None
     chunk_number = lines = ok = failed = 0
+    rows_written = bytes_written = 0
     chunk_done = {}
 
     def close_chunk() -> None:
-        nonlocal output, lines
+        nonlocal output, lines, rows_written, bytes_written
         files.close()
         os.replace(temp, path)
+        rows_written += lines
+        bytes_written += path.stat().st_size
         for response_run, area_ids in chunk_done.items():
             credited = runs[response_run]
             for area_id in area_ids:
@@ -173,22 +176,23 @@ def sweep(
             client.event_hooks["response"].remove(archive)
 
     save_json(state_path, state)
-    return ok, failed
+    return ok, failed, rows_written, bytes_written
 
 
-def tick() -> None:
+def tick() -> dict:
     """Capture live BMKG forecast runs and retry missing points."""
     root = paths.ensure_layout()
     state_path = root / "state" / "bmkg.json"
     bronze = root / "bronze" / "bmkg"
     logger = get_logger(__name__)
+    report = {"rows": 0, "bytes": 0, "latency_min": None}
 
     with (root / "state" / "bmkg.lock").open("a") as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             logger.info("BMKG tick already running")
-            return
+            return report
 
         settings = config.settings()["bmkg"]
         try:
@@ -235,10 +239,14 @@ def tick() -> None:
                     directory = bronze / f"run={run[:13]}"
                     directory.mkdir(parents=True, exist_ok=True)
                     stamp = compact_stamp(fetched_at)
-                    with gzip.open(
-                        directory / f"sentinel={stamp}.jsonl.gz", "wt", encoding="utf-8"
-                    ) as output:
+                    path = directory / f"sentinel={stamp}.jsonl.gz"
+                    with gzip.open(path, "wt", encoding="utf-8") as output:
                         output.write(json.dumps(line, ensure_ascii=False) + "\n")
+                    report["rows"] += 1
+                    report["bytes"] += path.stat().st_size
+                    report["latency_min"] = (
+                        datetime.fromisoformat(fetched_at) - datetime.fromisoformat(run)
+                    ).total_seconds() / 60
                     runs[run] = {
                         "first_seen": fetched_at,
                         "done": [],
@@ -268,7 +276,7 @@ def tick() -> None:
             save_json(state_path, state)
 
             if newest is not None and not runs[newest]["complete"]:
-                ok, failed = sweep(
+                ok, failed, rows_written, bytes_written = sweep(
                     client,
                     settings["url"],
                     picks,
@@ -277,6 +285,8 @@ def tick() -> None:
                     state_path,
                     bronze / f"run={newest[:13]}",
                 )
+                report["rows"] += rows_written
+                report["bytes"] += bytes_written
 
         save_json(
             root / "state" / "health" / "bmkg.json",
@@ -288,3 +298,4 @@ def tick() -> None:
                 "runs_incomplete": sum(not progress["complete"] for progress in runs.values()),
             },
         )
+    return report

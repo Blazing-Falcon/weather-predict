@@ -233,14 +233,27 @@ def _prune(bronze: Path, silver: Path, cutoff: datetime, last: datetime | None) 
             file.unlink()
 
 
-def _tick(state: Path, now: datetime) -> None:
+def _live_cursor(state: Path) -> dict:
+    path = state / "himawari_live.json"
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+
+
+def newest_scan(now: datetime) -> datetime | None:
+    cursor = _live_cursor(paths.zone("state"))
+    last = datetime.fromisoformat(cursor["last_scan"]) if cursor else None
+    with http.client(timeout=15) as client:
+        ready = _ready_scans(client, now, last, config.settings()["himawari"])
+    return ready[-1][0] if ready else None
+
+
+def _tick(state: Path, now: datetime) -> dict:
     source = config.settings()["himawari"]
     bronze = paths.zone("bronze") / "himawari"
     silver = paths.zone("silver") / "cloud_kabkota"
     cursor_path = state / "himawari_live.json"
     frame_path = state / "himawari_last_frame.npz"
     latency_path = state / "himawari_latency.jsonl"
-    cursor = json.loads(cursor_path.read_text(encoding="utf-8")) if cursor_path.exists() else {}
+    cursor = _live_cursor(state)
     last = datetime.fromisoformat(cursor["last_scan"]) if cursor else None
     last_latency = cursor.get("latency_min_last")
     last_record = None
@@ -254,9 +267,13 @@ def _tick(state: Path, now: datetime) -> None:
     logger = get_logger(__name__)
     grid = None
     previous = None
+    reports = {}
     with http.client(timeout=15) as client, ThreadPoolExecutor(max_workers=3) as pool:
         ready = _ready_scans(client, now, last, source)
         for scan, ready_at, objects in ready:
+            report = reports.setdefault(scan.strftime("%Y-%m"), {
+                "slots": 0, "bronze_bytes": 0, "rows": 0, "silver_bytes": 0,
+            })
             directory = bronze / f"date={scan:%Y-%m-%d}" / f"hour={scan:%H}"
             directory.mkdir(parents=True, exist_ok=True)
             downloads = [
@@ -281,17 +298,20 @@ def _tick(state: Path, now: datetime) -> None:
                     tb = _decode(files, state / "himawari_index.npz", grid, source)
                     rows = cloud_rows(scan, tb, previous, zonal, motion, settings["cold_k"])
                     merge_scan(partition / PART, rows, scan)
+                    report["rows"] += rows.num_rows
+                    report["silver_bytes"] = (partition / PART).stat().st_size
                     temp = frame_path.with_suffix(".tmp.npz")
                     np.savez(temp, tb=tb, slot=scan.isoformat())
                     temp.replace(frame_path)
                     previous = scan, tb
 
             stats = [file.stat() for file in files]
+            size = sum(stat.st_size for stat in stats)
             manifest = pa.Table.from_pylist([{
                 "scan": scan,
                 "files": [file.name for file in files],
                 "fetched_at": datetime.fromtimestamp(max(stat.st_mtime for stat in stats), UTC),
-                "bytes": sum(stat.st_size for stat in stats),
+                "bytes": size,
             }], schema=MANIFEST_SCHEMA)
             merge_scan(partition / MANIFEST, manifest, scan)
             last_latency = (ready_at - scan).total_seconds() / 60
@@ -311,6 +331,9 @@ def _tick(state: Path, now: datetime) -> None:
                 "last_scan": scan.isoformat(), "latency_min_last": last_latency,
             })
             last = scan
+            report["slots"] += 1
+            report["bronze_bytes"] += size
+            report["latency_min"] = last_latency
 
     _prune(bronze, silver, now - RETENTION, last)
     health = state / "health"
@@ -320,9 +343,10 @@ def _tick(state: Path, now: datetime) -> None:
         "latency_min_last": last_latency, "scans_processed": len(ready),
     })
     logger.info("Himawari tick scans_processed=%d", len(ready))
+    return reports
 
 
-def tick() -> None:
+def tick() -> dict:
     try:
         state = paths.zone("state")
         state.mkdir(parents=True, exist_ok=True)
@@ -330,8 +354,8 @@ def tick() -> None:
             try:
                 flock(lock, LOCK_EX | LOCK_NB)
             except BlockingIOError:
-                return
-            _tick(state, datetime.now(UTC))
+                return {}
+            return _tick(state, datetime.now(UTC))
     except (OSError, ValueError, RuntimeError, httpx.HTTPError) as error:
         typer.echo(redact(str(error)), err=True)
         raise typer.Exit(1) from None

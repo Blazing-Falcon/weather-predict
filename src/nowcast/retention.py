@@ -215,6 +215,20 @@ def disk(
     budget_gb: Annotated[float | None, typer.Option(help="Disk budget in GB.")] = None,
 ) -> None:
     """Measure dataset sizes and check the disk budget."""
+    report = disk_usage(budget_gb)
+    sizes = report["datasets"]
+    width = max(len(name) for name in sizes)
+    typer.echo(f"{'Dataset':<{width}}  {'Size (MB)':>10}")
+    for name, size in sizes.items():
+        typer.echo(f"{name:<{width}}  {size / 1_000_000:10.3f}")
+    typer.echo(f"TOTAL {report['total_bytes'] / 1_000_000_000:.6f} GB of {report['budget_gb']:g} GB")
+    _write_health(paths.data_root(), "disk", report)
+    if report["budget_exceeded"]:
+        typer.echo("FAIL disk budget exceeded")
+        raise typer.Exit(1)
+
+
+def disk_usage(budget_gb: float | None = None) -> dict:
     root = paths.data_root()
     settings = config.retention()
     budget = settings["budget_gb"] if budget_gb is None else budget_gb
@@ -242,24 +256,11 @@ def disk(
                 if (stat := _entry_stat(directory / name)) is not None and S_ISREG(stat.st_mode):
                     sizes[bucket] += stat.st_size
 
-    width = max(len(name) for name in sizes)
-    typer.echo(f"{'Dataset':<{width}}  {'Size (MB)':>10}")
-    for name, size in sizes.items():
-        typer.echo(f"{name:<{width}}  {size / 1_000_000:10.3f}")
     total = sum(sizes.values())
-    failed = total / 1_000_000_000 > budget
-    typer.echo(f"TOTAL {total / 1_000_000_000:.6f} GB of {budget:g} GB")
-    _write_health(
-        root,
-        "disk",
-        {
-            "run_at": datetime.now(UTC).isoformat(),
-            "datasets": sizes,
-            "total_bytes": total,
-            "budget_gb": budget,
-            "budget_exceeded": failed,
-        },
-    )
-    if failed:
-        typer.echo("FAIL disk budget exceeded")
-        raise typer.Exit(1)
+    return {
+        "run_at": datetime.now(UTC).isoformat(),
+        "datasets": sizes,
+        "total_bytes": total,
+        "budget_gb": budget,
+        "budget_exceeded": total / 1_000_000_000 > budget,
+    }

@@ -280,13 +280,14 @@ def _slot_range(start: datetime, end: datetime) -> list[datetime]:
     return [start + i * SLOT_LENGTH for i in range((end - start) // SLOT_LENGTH)]
 
 
-def _backfill(start: datetime, end: datetime, force: bool, state_path: Path) -> None:
+def _backfill(start: datetime, end: datetime, force: bool, state_path: Path) -> dict:
     state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else {}
     logger = get_logger(__name__)
     grid = imerg_grid()
     zonal = None
     settings = config.settings()
     parallel = _parallel()
+    reports = {}
     month = start
     while month <= end:
         following = (month + timedelta(days=32)).replace(day=1)
@@ -325,6 +326,10 @@ def _backfill(start: datetime, end: datetime, force: bool, state_path: Path) -> 
                     download_month(granules, bronze, grid, parallel, progress)
                 stats = write_month(granules, bronze, silver, grid, zonal)
                 progress.update(stats)
+                reports[label] = {
+                    "slots": len(slots), "bronze_bytes": progress["bytes"],
+                    "rows": stats["rows"], "silver_bytes": stats["silver_bytes"],
+                }
                 logger.info("IMERG %s null area-slots=%d", label, stats["null_area_slots"])
                 state[label] = {
                     "done": True,
@@ -354,13 +359,14 @@ def _backfill(start: datetime, end: datetime, force: bool, state_path: Path) -> 
         for crop in bronze.glob("*.nc4*"):
             crop.unlink()
         month = following
+    return reports
 
 
 def backfill(
     start: Annotated[str, typer.Option(help="First UTC month (YYYY-MM).")],
     end: Annotated[str, typer.Option(help="Last UTC month (YYYY-MM), inclusive.")],
     force: Annotated[bool, typer.Option(help="Process completed months again.")] = False,
-) -> None:
+) -> dict:
     try:
         if not all(re.fullmatch(r"[0-9]{4}-[0-9]{2}", month) for month in (start, end)):
             raise ValueError("Month bounds must use YYYY-MM")
@@ -374,7 +380,7 @@ def backfill(
         try:
             # Lock the directory because saving state replaces the JSON file.
             flock(lock, LOCK_EX)
-            _backfill(first, last, force, state / "imerg_backfill.json")
+            return _backfill(first, last, force, state / "imerg_backfill.json")
         finally:
             os.close(lock)
     except (OSError, ValueError, RuntimeError, httpx.HTTPError) as error:
@@ -382,20 +388,37 @@ def backfill(
         raise typer.Exit(1) from None
 
 
-def _tick(state: Path, now: datetime) -> None:
+def _live_cursor(state: Path) -> dict:
+    path = state / "imerg_live.json"
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {
+        "last_slot": None, "processed": 0,
+    }
+
+
+def _live_start(cursor: dict, now: datetime) -> datetime:
+    last = cursor["last_slot"]
+    return datetime.fromisoformat(last) + timedelta(seconds=1) if last else now - timedelta(hours=12)
+
+
+def newest_granule(now: datetime) -> Granule | None:
+    start = _live_start(_live_cursor(paths.zone("state")), now)
+    if start > now:
+        return None
+    entry = cmr.latest_granule(config.settings()["imerg"]["collection"], start, now)
+    granules = select_granules([entry], start, now + timedelta(microseconds=1)) if entry else []
+    return granules[0] if granules else None
+
+
+def _tick(state: Path, now: datetime) -> dict:
     cursor_path = state / "imerg_live.json"
-    cursor = {"last_slot": None, "processed": 0}
-    if cursor_path.exists():
-        cursor = json.loads(cursor_path.read_text(encoding="utf-8"))
+    cursor = _live_cursor(state)
     last_slot = cursor["last_slot"]
-    start = (
-        datetime.fromisoformat(last_slot) + timedelta(seconds=1)
-        if last_slot else now - timedelta(hours=12)
-    )
+    start = _live_start(cursor, now)
     entries = cmr.granules(config.settings()["imerg"]["collection"], start, now)
     seen_at = datetime.now(UTC)
     granules = select_granules(entries, start, now + timedelta(microseconds=1))
 
+    reports = {}
     if granules:
         grid = imerg_grid()
         membership = pq.read_table(paths.zone("ref") / "imerg_membership.parquet")
@@ -407,8 +430,15 @@ def _tick(state: Path, now: datetime) -> None:
         for partition, batch in months.items():
             bronze = paths.zone("bronze") / "imerg" / partition
             silver = paths.zone("silver") / "rain_kabkota" / partition
-            download_month(batch, bronze, grid, parallel, {"downloaded": 0, "failed": 0, "bytes": 0})
-            write_month(batch, bronze, silver, grid, zonal, merge=True)
+            progress = {"downloaded": 0, "failed": 0, "bytes": 0}
+            download_month(batch, bronze, grid, parallel, progress)
+            stats = write_month(batch, bronze, silver, grid, zonal, merge=True)
+            last = batch[-1].slot
+            reports[last.strftime("%Y-%m")] = {
+                "slots": len(batch), "bronze_bytes": progress["bytes"],
+                "rows": stats["rows"], "silver_bytes": stats["silver_bytes"],
+                "latency_min": (seen_at - (last + SLOT_LENGTH)).total_seconds() / 60,
+            }
         last_slot = granules[-1].slot.isoformat()
 
     latency_path = state / "imerg_latency.jsonl"
@@ -458,9 +488,10 @@ def _tick(state: Path, now: datetime) -> None:
             "processed": cursor["processed"] + len(granules),
         })
     get_logger(__name__).info("IMERG tick new_slots=%d", len(granules))
+    return reports
 
 
-def tick() -> None:
+def tick() -> dict:
     try:
         state = paths.zone("state")
         state.mkdir(parents=True, exist_ok=True)
@@ -468,15 +499,15 @@ def tick() -> None:
             try:
                 flock(lock, LOCK_EX | LOCK_NB)
             except BlockingIOError:
-                return
+                return {}
             directory = os.open(state, os.O_RDONLY)
             try:
                 try:
                     # Backfill also locks the directory while it writes the same partitions.
                     flock(directory, LOCK_EX | LOCK_NB)
                 except BlockingIOError:
-                    return
-                _tick(state, datetime.now(UTC))
+                    return {}
+                return _tick(state, datetime.now(UTC))
             finally:
                 os.close(directory)
     except (OSError, ValueError, RuntimeError, httpx.HTTPError) as error:

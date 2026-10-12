@@ -90,7 +90,7 @@ def forecast_values(step: dict, lead: float) -> dict:
 
 def parse(
     month: Annotated[str | None, typer.Option(help="Rebuild only this YYYY-MM partition.")] = None,
-) -> None:
+) -> dict:
     """Rebuild BMKG forecast partitions from bronze."""
     if month is not None:
         try:
@@ -104,6 +104,7 @@ def parse(
     partitions = defaultdict(lambda: defaultdict(dict))
     first_seen = {}
     skipped = 0
+    report = {"rows": 0, "bytes": 0}
     files = sorted(
         path
         for pattern in ("sentinel", "sweep")
@@ -208,6 +209,8 @@ def parse(
             [(key, "ascending") for key in ("area_id", "analysis_time", "valid_time")]
         )
         parquet.write_table(table, target)
+        report["rows"] += table.num_rows
+        report["bytes"] += target.stat().st_size
         for name, letters in sorted(dead_letters.items()):
             target = bronze / "_dlq" / name
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -223,3 +226,4 @@ def parse(
                 except BaseException:
                     os.unlink(temp.name)
                     raise
+    return report

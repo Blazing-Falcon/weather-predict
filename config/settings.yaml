@@ -45,3 +45,12 @@ nasa:
 target:
   threshold_mm_h: 0.5
   leads_h: [1, 2, 3]
+
+model:
+  imerg_lag_minutes: 360     # issue time minus the START of the newest IMERG slot usable at that time
+  issue_every_minutes: 30
+  climatology_period: ["2025-01-01", "2025-01-21"]   # training period only; full run: 2016-01-01..2023-12-31
+  split:                     # dev sample month; full run is a config change
+    train: ["2025-01-01", "2025-01-21"]
+    valid: ["2025-01-22", "2025-01-25"]
+    test:  ["2025-01-26", "2025-01-31"]

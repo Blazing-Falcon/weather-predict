@@ -825,6 +825,7 @@ dependencies = [
     { name = "opencv-python-headless" },
     { name = "pyarrow" },
     { name = "pyproj" },
+    { name = "pyspark" },
     { name = "python-dotenv" },
     { name = "pyyaml" },
     { name = "satpy" },
@@ -850,6 +851,7 @@ requires-dist = [
     { name = "opencv-python-headless", specifier = "==5.1.0.95" },
     { name = "pyarrow", specifier = "==26.0.1" },
     { name = "pyproj", specifier = "==3.8.0" },
+    { name = "pyspark", specifier = "==4.3.0" },
     { name = "python-dotenv", specifier = "==1.2.4" },
     { name = "pyyaml", specifier = "==6.0.3" },
     { name = "satpy", specifier = "==0.60.0" },
@@ -1081,6 +1083,15 @@ wheels = [
 ]
 
 [[package]]
+name = "py4j"
+version = "0.10.9.9"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/38/31/0b210511177070c8d5d3059556194352e5753602fa64b85b7ab81ec1a009/py4j-0.10.9.9.tar.gz", hash = "sha256:f694cad19efa5bd1dee4f3e5270eb406613c974394035e5bfc4ec1aba870b879", size = 761089, upload-time = "2025-01-15T03:53:18.624Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/bd/db/ea0203e495be491c85af87b66e37acfd3bf756fd985f87e46fc5e3bf022c/py4j-0.10.9.9-py2.py3-none-any.whl", hash = "sha256:c7c26e4158defb37b0bb124933163641a2ff6e3a3913f7811b0ddbe07ed61533", size = 203008, upload-time = "2025-01-15T03:53:15.648Z" },
+]
+
+[[package]]
 name = "pyarrow"
 version = "26.0.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1264,6 +1275,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/a9/9a/d9db1ed3d69440bb24ec5c56e283fe4068aef61e88dd707a022b1e2696bb/pyresample-1.35.0-cp312-cp312-win_amd64.whl", hash = "sha256:eb5a3a52bb314acaa642b61110153dc0f95163a66a6a1e9718390bb468b567c1", size = 2305308, upload-time = "2025-12-02T03:17:42.565Z" },
     { url = "https://files.pythonhosted.org/packages/8d/7a/f320aa2b8f575a94e620c2216799a4b1f3488c0ef602ab87103a0a5ac86e/pyresample-1.35.0-cp312-cp312-win_arm64.whl", hash = "sha256:eda8bf48acfaeab282ac85495fc210b2f2081dd27738d0aadac0a4b99ffa275c", size = 2242846, upload-time = "2025-12-02T03:17:43.696Z" },
 ]
+
+[[package]]
+name = "pyspark"
+version = "4.3.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "py4j" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/46/b2/4e28aaffe28db4745ac5df3ee9115719c1b5da5cce4106bee99c82d1eb2c/pyspark-4.3.0.tar.gz", hash = "sha256:e8c517948eff7088a7aa07449aa8eafa4a15a8d50319de2525a6fd26622476c6", size = 455910862, upload-time = "2026-10-30T15:30:57.079Z" }
 
 [[package]]
 name = "pytest"

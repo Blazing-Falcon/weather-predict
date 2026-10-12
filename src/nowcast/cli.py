@@ -4,6 +4,7 @@ import typer
 
 from nowcast import __version__
 from nowcast.doctor import doctor
+from nowcast.features import build, climatology
 from nowcast.registry.cli import app as registry_app
 from nowcast.retention import disk, retention
 from nowcast.silver.bmkg import parse as bmkg_parse
@@ -33,7 +34,9 @@ imerg_app.command("backfill")(imerg_backfill)
 imerg_app.command("tick")(imerg_tick)
 imerg_app.command("gaps")(imerg_gaps)
 app.add_typer(imerg_app, name="imerg")
-mergir_app = typer.Typer(no_args_is_help=True, help="Archive MERGIR cloud features and report gaps.")
+mergir_app = typer.Typer(
+    no_args_is_help=True, help="Archive MERGIR cloud features and report gaps."
+)
 mergir_app.command("backfill")(mergir_backfill)
 mergir_app.command("gaps")(mergir_gaps)
 app.add_typer(mergir_app, name="mergir")
@@ -45,6 +48,10 @@ gauges_app.command()(gauges.stations)
 gauges_app.command()(gauges.ghcnh)
 gauges_app.command()(gauges.metar)
 app.add_typer(gauges_app, name="gauges")
+features_app = typer.Typer(no_args_is_help=True, help="Build issue-time features and climatology.")
+features_app.command("build")(build.build)
+features_app.command("climatology")(climatology.climatology)
+app.add_typer(features_app, name="features")
 
 
 @app.callback(invoke_without_command=True)

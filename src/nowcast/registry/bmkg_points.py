@@ -26,7 +26,7 @@ def fetch_json(client, url, **kwargs):
     return payload, None
 
 
-def candidate(kecamatan, wilayah_client, bmkg_client, bmkg_url):
+def candidate(kecamatan, wilayah_client, bmkg_client, bmkg_url, max_tries=3):
     record = {
         "adm4": None,
         "desa": None,
@@ -40,7 +40,7 @@ def candidate(kecamatan, wilayah_client, bmkg_client, bmkg_url):
         return record | {"error": error}
 
     error = "LookupError"
-    for tries, village in enumerate(payload.get("data", [])[:3], start=1):
+    for tries, village in enumerate(payload.get("data", [])[:max_tries], start=1):
         record["tries"] = tries
         code = village["code"]
         forecast, error = fetch_json(bmkg_client, bmkg_url, params={"adm4": code})
@@ -82,7 +82,7 @@ def candidate(kecamatan, wilayah_client, bmkg_client, bmkg_url):
     return record | {"error": error}
 
 
-def sweep(limit: int | None) -> None:
+def sweep(limit: int | None, max_tries: int = 3) -> None:
     bmkg = config.settings()["bmkg"]
     try:
         rpm = int(config.env("BMKG_MAX_RPM", str(bmkg["max_rpm"])))
@@ -135,7 +135,7 @@ def sweep(limit: int | None) -> None:
                     "kecamatan_code": code,
                     "kabkota_code": kabkota,
                     "area_id": area_ids[kabkota],
-                    **candidate(code, wilayah_client, bmkg_client, bmkg["url"]),
+                    **candidate(code, wilayah_client, bmkg_client, bmkg["url"], max_tries),
                     "fetched_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
                 }
                 history.write((json.dumps(record, ensure_ascii=False) + "\n").encode("utf-8"))

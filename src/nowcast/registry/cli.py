@@ -16,8 +16,9 @@ app = typer.Typer(help="Reference tables built once.")
 @app.command()
 def bmkg_candidates(
     limit: Annotated[int | None, typer.Option(min=0, help="Maximum kecamatan to process.")] = None,
+    max_tries: Annotated[int, typer.Option(min=1, help="Villages to try per kecamatan.")] = 3,
 ) -> None:
-    sweep(limit)
+    sweep(limit, max_tries)
 
 
 @app.command()

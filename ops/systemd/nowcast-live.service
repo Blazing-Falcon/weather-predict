@@ -1,0 +1,9 @@
+[Unit]
+Description=Issue and verify live nowcast forecasts
+
+[Service]
+Type=oneshot
+WorkingDirectory=@REPO@
+Environment=TZ=UTC
+ExecStart=@UV@ run --frozen nowcast live score
+ExecStart=@UV@ run --frozen nowcast live verify

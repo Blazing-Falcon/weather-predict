@@ -1,0 +1,8 @@
+[Unit]
+Description=Compute daily nowcast scores
+
+[Service]
+Type=oneshot
+WorkingDirectory=@REPO@
+Environment=TZ=UTC
+ExecStart=@UV@ run --frozen nowcast live daily

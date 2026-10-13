@@ -1,0 +1,9 @@
+[Unit]
+Description=Issue and verify live nowcast forecasts every 5 minutes
+
+[Timer]
+OnCalendar=*-*-* *:00/5:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target

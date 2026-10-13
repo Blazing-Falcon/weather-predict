@@ -6,6 +6,7 @@ bmkg:
   retry_missing_hours: 6
   sentinels: ["35.73", "73.71", "91.71"]
   rain_codes_min: 60           # codes 60-99 count as rain for the baseline
+  step_alignment: centred      # Test before | after | centred once the archive has weeks of data.
 
 imerg:
   collection: C2723758340-GES_DISC        # GPM_3IMERGHHE v07

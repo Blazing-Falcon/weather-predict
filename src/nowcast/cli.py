@@ -5,6 +5,7 @@ import typer
 from nowcast import __version__
 from nowcast.doctor import doctor
 from nowcast.features import build, climatology
+from nowcast.model import score, scores_daily, verify
 from nowcast.model.train import train
 from nowcast.registry.cli import app as registry_app
 from nowcast.retention import disk, retention
@@ -56,6 +57,11 @@ app.add_typer(features_app, name="features")
 model_app = typer.Typer(no_args_is_help=True, help="Train and evaluate nowcast models.")
 model_app.command("train")(train)
 app.add_typer(model_app, name="model")
+live_app = typer.Typer(no_args_is_help=True, help="Issue and verify live nowcast forecasts.")
+live_app.command()(score.score)
+live_app.command()(verify.verify)
+live_app.command()(scores_daily.daily)
+app.add_typer(live_app, name="live")
 
 
 @app.callback(invoke_without_command=True)

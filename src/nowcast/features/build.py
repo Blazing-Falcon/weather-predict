@@ -23,6 +23,8 @@ CLOUD_SCHEMA = (
     "tb_mean_x10 smallint, adv1_pct smallint, adv2_pct smallint, adv3_pct smallint, flow_kmh smallint"
 )
 CLIM_KEYS = ["area_id", "month", "hour_local"]
+CLOUD_PARTS = {1: "part-mergir.parquet", 2: "part-himawari.parquet"}
+LOCAL_OFFSETS = {"WIB": 7, "WITA": 8, "WIT": 9}
 LEADS = (1, 2, 3)
 TARGETS = [f"y{lead}" for lead in LEADS]
 KEYS = ["t", "area_id", "imerg_slot", "cloud_slot"]
@@ -110,7 +112,7 @@ def read_slots(
 
 
 def local_time(slot: str) -> Column:
-    zone = F.create_map(F.lit("WIB"), F.lit(7), F.lit("WITA"), F.lit(8), F.lit("WIT"), F.lit(9))
+    zone = F.create_map(*(F.lit(value) for pair in LOCAL_OFFSETS.items() for value in pair))
     return F.timestamp_seconds(F.col(slot) * SLOT_SECONDS + zone[F.col("tz")] * 3600)
 
 
@@ -138,6 +140,7 @@ def feature_rows(
     stop: datetime,
     lag: int,
     every: int,
+    cloud_source: int = 1,
 ) -> DataFrame:
     start, end = slot_number(first), slot_number(stop) - 1
     offset = start - slot_number(available_imerg_slot(first, lag))
@@ -179,11 +182,11 @@ def feature_rows(
     cloud = read_slots(
         spark,
         root / "silver" / "cloud_kabkota",
-        "part-mergir.parquet",
+        CLOUD_PARTS[cloud_source],
         CLOUD_SCHEMA,
         start - 2,
         end,
-    ).where(F.col("source") == 1)
+    ).where(F.col("source") == cloud_source)
     cloud_now = cloud.select(
         F.col("slot").alias("t"),
         "area_id",
@@ -256,10 +259,18 @@ def feature_rows(
     )
 
 
+def read_climatology(spark: SparkSession, root: Path) -> DataFrame:
+    return spark.read.parquet(str(root / "gold" / "climatology" / "part.parquet")).select(
+        *CLIM_KEYS,
+        *[F.col(name).alias(f"clim_{name}") for name in ("wet_pct", "p1", "p2", "p3")],
+    )
+
+
 def build(
     start: Annotated[str, typer.Option()],
     end: Annotated[str, typer.Option()],
     out: Annotated[Path | None, typer.Option()] = None,
+    cloud_source: Annotated[int, typer.Option(min=1, max=2, help="1 = MERGIR, 2 = Himawari.")] = 1,
 ) -> None:
     try:
         first, stop = date_range(start, end)
@@ -289,12 +300,7 @@ def build(
         if newest is None:
             raise ValueError(f"No IMERG slots in {rain_dir}")
         areas = admin_areas(spark, root)
-        climatology = spark.read.parquet(
-            str(root / "gold" / "climatology" / "part.parquet")
-        ).select(
-            *CLIM_KEYS,
-            *[F.col(name).alias(f"clim_{name}") for name in ("wet_pct", "p1", "p2", "p3")],
-        )
+        climatology = read_climatology(spark, root)
         staged = Path(temp) / "features"
         available_stop = datetime.fromtimestamp(newest - (2 * max(LEADS) - 2) * SLOT_SECONDS, UTC)
         for month_first, month_stop in month_ranges(first, min(stop, available_stop)):
@@ -311,6 +317,7 @@ def build(
                 month_stop,
                 lag,
                 every,
+                cloud_source,
             )
             stats = Observation()
             observed = rows.observe(
@@ -326,7 +333,8 @@ def build(
                 metrics[name] = metrics.get(name, 0) + value
         if not metrics:
             rows = feature_rows(
-                spark, root, areas, climatology, first, first + timedelta(minutes=30), lag, every
+                spark, root, areas, climatology, first, first + timedelta(minutes=30), lag, every,
+                cloud_source,
             )
             rows.limit(0).write.parquet(str(staged))
         previous = Path(temp) / "previous"

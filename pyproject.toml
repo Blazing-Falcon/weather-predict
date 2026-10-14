@@ -5,6 +5,8 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "dagster==1.13.31",
     "dagster-webserver==1.13.31",
+    "duckdb==2.0.0",
+    "fastapi==0.165.0",
     "geopandas==1.2.0",
     "h5py==3.16.0",
     "httpx==0.28.1",
@@ -21,6 +23,7 @@ dependencies = [
     "scipy==1.18.1",
     "shapely==2.2.0",
     "typer==0.29.2",
+    "uvicorn==0.54.0",
 ]
 
 [project.scripts]

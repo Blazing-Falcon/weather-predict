@@ -1,0 +1,35 @@
+# Nowcast API
+
+## Page Data
+
+| Page | Data Needed | Endpoint |
+|---|---|---|
+| Map | Area and neighbouring outlines, area names and positions | `GET /geo/kabkota.geojson`, `GET /geo/neighbours.geojson`, `GET /api/meta` |
+| Map | Timeline, latest observation and issue markers, model probabilities, observed rain, cold-cloud share, BMKG rain and disagreement | `GET /api/meta`, `GET /api/frames?layer=prob3` (also `prob1`, `prob2`, `obs`, `cold`, `bmkg`, `disagree`) |
+| Map | Raw rain image, cloud overlay and their bounds and available timestamps, METAR station markers | `GET /tiles/rain/{slot}.png`, `GET /tiles/cloud/{scan}.webp`, `GET /api/meta` |
+| Map | Area drawer and tooltip with rain, cloud-top temperature and cold share, forecasts, BMKG weather, local scores and climatology. National score table | `GET /api/areas/{area_id}`, `GET /api/scores?scope=national` |
+| Overview | Source freshness, area count, issue time, national rain and cold-cloud counts and trends, expected rain share and island breakdown | `GET /api/meta`, `GET /api/frames` (`obs`, `cold`, `prob3`). Aggregate over available areas and leave missing slots blank. |
+| Overview | Alert counts by level, ranked forecasts with cloud-top temperature and BMKG weather | `GET /api/alerts`. Use `threshold=0` for the full forecast ranking and the selected threshold for counts. |
+| Alerts | Issue time, level, area names and location filters, probabilities by lead, cloud-top temperature, cold share and BMKG weather. Name search and watch filtering use the returned rows. | `GET /api/alerts?level=&island=&province=&threshold=`, `GET /api/meta` |
+| Model | Training and test periods, metrics and baselines, calibration, importance, thresholds and version history. Live verification CSI by local hour and island | `GET /api/model`, `GET /api/scores?scope=island` for daily scores |
+| History | Area comparison selector, local month × hour heatmap, monthly and annual rainfall, wet-season timing and archive coverage | `GET /api/meta`, `GET /api/history/{area_id}` for each selected area |
+| Pipeline | Job health, recent Dagster runs, source availability and latency, disk use and retention caps, processed grid values and retained silver bytes, measured backfill progress | `GET /api/pipeline`, `GET /api/meta` |
+| Settings | Area names for the watch list, METAR stations and alert threshold | `GET /api/meta`, `GET /api/alerts?threshold=`. Theme, threshold preference, initial zoom, opacity, gauge visibility and watch list stay in browser storage. |
+
+The pipeline diagram and page labels are UI content. The mockup's generated forecasts, seeded history and ENSO labels have no corresponding production records. The API serves archived forecasts and measured rain, with the archive coverage reported alongside the totals. The live CSI breakdown uses verified production rows. The training card supplies the test-period results it records.
+
+## Response Conventions
+
+- Timestamps are UTC ISO 8601. Use an offset or `Z` in query parameters. A missing dataset returns empty arrays or nulls. An area absent from an existing area catalog returns HTTP 404. GeoJSON and tiles return HTTP 404 when their files are absent.
+- `/api/meta` gives the area catalog, configured METAR stations, tile bounds and tile filename stems from the last seven days. Freshness is the elapsed time from each source's latest data timestamp to `as_of`. BMKG reports the run time and the earliest time that run was seen.
+- `/api/frames` defaults to `prob3` and a window from 48 hours ago through three hours ahead. Both bounds are inclusive. Supply both bounds for a historical request. The maximum span is seven days. Each row has 519 positions indexed by area ID. Missing values are null. Whole slots appear only if they are in the archive for the requested layer.
+- Frame units are tenths of mm/h for `obs`, percent for `cold` and `prob1` through `prob3`, 0/100 for `bmkg` and 0/1 for `disagree`. A probability is tied to its archived issue slot and gives the chance of rain over the following hour, two hours or three hours. The client can use the latest issue and all three leads for the future part of the slider. Store the issue time with any displayed outlook.
+- `/api/areas/{area_id}` reports 48 hours of observed rain, forecasts and cloud scans. BMKG gives the archived weather code and rain flag at half-hour slots through three hours ahead. Each slot uses the latest run available at that slot or at request time for future slots. A slot outside the run's valid steps has null weather. Cloud-top temperature is in kelvin. The score block identifies its scope and ID. If area scores are missing in the 30-day window, it gives province scores when the area has a province.
+- `/api/alerts` uses the maximum probability across leads 1–3 and the cloud top at the model's scan, with a recent cloud scan at or before issue as fallback. Awas requires at least 85% and at most 203 K, Siaga requires at least 70% and Waspada uses `threshold` (default 50). The `level` parameter sets the minimum level by name or rank. Province can be its name or code. Results sort by level, then probability.
+- `/api/scores` returns daily rows. `days` defaults to 30 and includes the current UTC date. `scope` accepts `national`, `island`, `province` and `area`. Use `id=ID` for national, the island name for island, the province code for province, or the area ID for area. `lead` accepts 1 through 3.
+- `/api/model` returns the full newest card and the cards' test Brier skill by lead. The live CSI charts cover the last 30 days of available verification and use a 50% cutoff, grouped by local issue hour or island.
+- `/api/history/{area_id}` groups rain totals by local calendar month and year, using UTC if the area's time zone is unavailable. A half-hour at `rain_mean_x10 = 10` contributes 0.5 mm. Slot counts show how much data contributes to each total. Climatology reports the archived mean spatial wet share and event probabilities `p1`–`p3` by local month and hour. Wet-season years with insufficient rain to meet the onset rule have null onset. The reported last wet dekad reflects only the available archive.
+- `/api/pipeline` reports configured retention caps and measured disk bytes. Its processed counts multiply distinct retained IMERG slots or MERGIR frames by the configured source grid size. Its latency median and p90 use arrival records from the last 24 hours. It also reports the most recent latency record, even when older, and up to 20 runs from the local Dagster SQLite run database.
+- Static files and frame requests ending more than six hours ago use `Cache-Control: public, max-age=86400`. Live API responses use `public, max-age=60`. Meta and pipeline snapshots are held in memory for 60 seconds. Responses support gzip and use the same origin.
+
+Run `uv run nowcast api` to serve on `127.0.0.1:8000`. Use `--host`, `--port` and `--reload` to override the defaults. Interactive API documentation is at `/docs`. Run `uv run python experiments/05_api_timing.py` while the server is running to measure median and p95 request times.

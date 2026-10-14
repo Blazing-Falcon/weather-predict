@@ -77,3 +77,15 @@ def main(
     if version:
         typer.echo(f"nowcast {__version__}")
         raise typer.Exit()
+
+
+@app.command()
+def api(
+    host: Annotated[str, typer.Option(help="Bind address.")] = "127.0.0.1",
+    port: Annotated[int, typer.Option(min=1, max=65535, help="Bind port.")] = 8000,
+    reload: Annotated[bool, typer.Option("--reload", help="Reload on source changes.")] = False,
+) -> None:
+    """Serve the read-only Nowcast API."""
+    import uvicorn
+
+    uvicorn.run("nowcast.api.app:app", host=host, port=port, reload=reload)

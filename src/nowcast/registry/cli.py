@@ -3,8 +3,9 @@ from typing import Annotated
 
 import typer
 
-from nowcast.registry.bmkg_points import sweep
+from nowcast.registry.bmkg_points import build_picks, sweep
 from nowcast.registry.boundaries import download
+from nowcast.registry.check import run as run_checks
 from nowcast.registry.dim_area import build
 from nowcast.registry.grids import fetch_mergir_grid
 from nowcast.registry.membership import build as build_membership
@@ -19,6 +20,21 @@ def bmkg_candidates(
     max_tries: Annotated[int, typer.Option(min=1, help="Villages to try per kecamatan.")] = 3,
 ) -> None:
     sweep(limit, max_tries)
+
+
+@app.command()
+def bmkg_picks() -> None:
+    """Pick a BMKG forecast point for each admin area."""
+    build_picks()
+
+
+@app.command()
+def check(
+    wilayah: Annotated[bool, typer.Option(help="Verify alias codes on wilayah.id.")] = False,
+) -> None:
+    """Validate the registry tables."""
+    if not run_checks(wilayah):
+        raise typer.Exit(1)
 
 
 @app.command()

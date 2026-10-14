@@ -3,14 +3,33 @@ import json
 from datetime import UTC, datetime
 from time import monotonic, sleep
 
+import geopandas as gpd
 import httpx
+import numpy as np
+import pyarrow as pa
+import pyarrow.parquet as pq
+import shapely
 import typer
 
 from nowcast import config, http, paths
 from nowcast.http import rate_limit
 from nowcast.log import get_logger
+from nowcast.parquet import write_table
+from nowcast.registry.membership import admin_areas
 
 VILLAGES_URL = "https://wilayah.id/api/villages"
+NEAR_LIMIT_KM = 10
+CANDIDATE_SCHEMA = pa.schema(
+    [
+        ("kecamatan_code", pa.string()),
+        ("adm4", pa.string()),
+        ("desa", pa.string()),
+        ("lat", pa.float32()),
+        ("lon", pa.float32()),
+        ("area_id", pa.int16()),
+        ("fetched_at", pa.timestamp("us", tz="UTC")),
+    ]
+)
 
 
 def fetch_json(client, url, **kwargs):
@@ -155,3 +174,131 @@ def sweep(limit: int | None, max_tries: int = 3) -> None:
         skipped,
         len(pending) - len(batch),
     )
+
+
+def pick_candidates(areas, candidates):
+    points = gpd.GeoSeries(
+        gpd.points_from_xy([row["lon"] for row in candidates], [row["lat"] for row in candidates]),
+        crs=4326,
+    )
+    owners = np.array([row["area_id"] for row in candidates])
+    tree = shapely.STRtree(points.to_numpy())
+    projected = points.to_crs(6933).to_numpy()
+    polygons = areas.geometry.to_crs(6933)
+    centres = areas.geometry.representative_point().to_crs(6933)
+    picks = {}
+    for area, polygon, centre in zip(areas.itertuples(index=False), polygons, centres, strict=True):
+        inside = tree.query(area.geometry, predicate="contains")
+        polygon_km = None
+        if len(inside):
+            own = inside[owners[inside] == area.area_id]
+            eligible = np.sort(own if len(own) else inside)
+            nearest = eligible[shapely.distance(projected[eligible], centre).argmin()]
+            kind = "inside" if len(own) else "other-area"
+        else:
+            own = np.flatnonzero(owners == area.area_id)
+            if not len(own):
+                continue
+            distances = shapely.distance(projected[own], polygon) / 1000
+            closest = distances.argmin()
+            polygon_km = distances[closest]
+            if not polygon_km <= NEAR_LIMIT_KM:
+                continue
+            nearest = own[closest]
+            kind = "near"
+        picks[area.area_id] = (
+            candidates[nearest],
+            kind,
+            projected[nearest].distance(centre) / 1000,
+            polygon_km,
+        )
+    return picks
+
+
+def build_picks() -> None:
+    ref = paths.zone("ref")
+    history = paths.zone("state") / "registry" / "bmkg_candidates.jsonl"
+    with history.open(encoding="utf-8") as source:
+        latest = {row["kecamatan_code"]: row for row in map(json.loads, source)}
+    failed = sorted(code for code, row in latest.items() if row["adm4"] is None)
+    rows = [
+        row
+        | {
+            "lat": float(row["lat"]),
+            "lon": float(row["lon"]),
+            "fetched_at": datetime.fromisoformat(row["fetched_at"]),
+        }
+        for row in latest.values()
+        if row["adm4"] is not None
+    ]
+    if len({row["adm4"] for row in rows}) != len(rows):
+        raise ValueError("Expected unique adm4 codes in the latest BMKG candidates")
+    table = pa.Table.from_pylist(rows, schema=CANDIDATE_SCHEMA).sort_by(
+        [("area_id", "ascending"), ("kecamatan_code", "ascending")]
+    )
+    write_table(table, ref / "bmkg_candidates.parquet")
+
+    logger = get_logger(__name__)
+    logger.info(
+        "BMKG candidates ok=%d failed=%d, failed kecamatan: %s",
+        len(rows),
+        len(failed),
+        ", ".join(failed) or "none",
+    )
+    areas = admin_areas([])
+    picks = pick_candidates(areas, table.to_pylist())
+    dimension = ref / "dim_area.parquet"
+    dim = pq.read_table(dimension)
+    records = dim.to_pylist()
+    distances = []
+    fallback = 0
+    near = 0
+    for row in records:
+        pick = picks.get(row["area_id"])
+        row.update(bmkg_adm4=None, bmkg_lon=None, bmkg_lat=None)
+        if not row["is_admin"]:
+            continue
+        if pick is None:
+            logger.warning(
+                "area_id=%d %s has no BMKG candidate inside or own candidate within %d km",
+                row["area_id"],
+                row["geo_name"],
+                NEAR_LIMIT_KM,
+            )
+            continue
+        candidate, kind, distance, polygon_km = pick
+        row.update(
+            bmkg_adm4=candidate["adm4"], bmkg_lon=candidate["lon"], bmkg_lat=candidate["lat"]
+        )
+        distances.append(distance)
+        if kind == "other-area":
+            fallback += 1
+            logger.warning(
+                "area_id=%d %s fallback adm4=%s from area_id=%d: no own candidate inside polygon",
+                row["area_id"],
+                row["geo_name"],
+                candidate["adm4"],
+                candidate["area_id"],
+            )
+        elif kind == "near":
+            near += 1
+            logger.warning(
+                "area_id=%d %s near adm4=%s distance_to_polygon=%.3f km: no candidate inside",
+                row["area_id"],
+                row["geo_name"],
+                candidate["adm4"],
+                polygon_km,
+            )
+
+    write_table(pa.Table.from_pylist(records, schema=dim.schema), dimension)
+    logger.info(
+        "BMKG areas own_inside=%d other_area=%d near=%d null=%d",
+        len(picks) - fallback - near,
+        fallback,
+        near,
+        len(areas) - len(picks),
+    )
+    if distances:
+        logger.info(
+            "BMKG pick distance km median=%.3f max=%.3f", np.median(distances), max(distances)
+        )

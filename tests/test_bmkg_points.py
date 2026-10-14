@@ -1,8 +1,10 @@
 import json
 from unittest.mock import Mock
 
+import geopandas as gpd
 import httpx
 import pytest
+from shapely.geometry import Polygon, box
 from typer.testing import CliRunner
 
 from nowcast import config, http
@@ -169,3 +171,46 @@ def test_rate_limits_include_http_retries(run, clock):
     assert times["wilayah.id"] == pytest.approx([0, 0.2, 0.4])
     assert times["bmkg.test"] == pytest.approx([0.4, 2.4, 6.4, 8.4])
     assert records[-1]["tries"] == 2
+
+
+@pytest.mark.parametrize(
+    ("polygon", "locations", "expected", "kind"),
+    [
+        (
+            Polygon([(0, 0), (4, 0), (4, 1), (1, 1), (1, 4), (0, 4)]),
+            [(23, 1.4, 0.8), (23, 0.5, 2.7), (99, 0.5, 2.5)],
+            1,
+            "inside",
+        ),
+        (box(0, 0, 4, 4), [(23, 2, 2.9), (23, 3, 2)], 1, "inside"),
+        (box(0, 0, 4, 4), [(23, 4.1, 2), (23, 0.2, 0.2)], 1, "inside"),
+        (box(0, 0, 4, 4), [(23, 4.05, 2), (99, 2, 2)], 1, "other-area"),
+        (
+            box(0, 0, 4, 4),
+            [(23, 4.09, 2), (23, 4.02, 3.9), (99, 4.001, 2)],
+            1,
+            "near",
+        ),
+    ],
+    ids=["representative-point", "projected-distance", "ignore-outside", "fallback", "near"],
+)
+def test_pick_candidates(polygon, locations, expected, kind):
+    areas = gpd.GeoDataFrame({"area_id": [23]}, geometry=[polygon], crs=4326)
+    candidates = [{"area_id": area_id, "lon": lon, "lat": lat} for area_id, lon, lat in locations]
+
+    candidate, pick_kind, _, polygon_km = bmkg_points.pick_candidates(areas, candidates)[23]
+
+    assert candidate == candidates[expected]
+    assert pick_kind == kind
+    if kind == "near":
+        assert polygon_km == pytest.approx(1.93, abs=0.01)
+
+
+def test_near_pick_rejects_own_candidate_over_10_km():
+    areas = gpd.GeoDataFrame({"area_id": [23]}, geometry=[box(0, 0, 4, 4)], crs=4326)
+    candidates = [
+        {"area_id": 23, "lon": 4.11, "lat": 2},
+        {"area_id": 99, "lon": 4.001, "lat": 2},
+    ]
+
+    assert bmkg_points.pick_candidates(areas, candidates) == {}

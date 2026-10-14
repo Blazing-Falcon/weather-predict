@@ -5,6 +5,7 @@ import typer
 from nowcast import __version__
 from nowcast.doctor import doctor
 from nowcast.features import build, climatology
+from nowcast.gold import frames, gauge_check, tiles
 from nowcast.model import score, scores_daily, verify
 from nowcast.model.train import train
 from nowcast.registry.cli import app as registry_app
@@ -62,6 +63,11 @@ live_app.command()(score.score)
 live_app.command()(verify.verify)
 live_app.command()(scores_daily.daily)
 app.add_typer(live_app, name="live")
+gold_app = typer.Typer(no_args_is_help=True, help="Build map layers and check rain gauges.")
+gold_app.command()(frames.frames)
+gold_app.command("tiles")(tiles.backfill)
+gold_app.command("gauge-check")(gauge_check.gauge_check)
+app.add_typer(gold_app, name="gold")
 
 
 @app.callback(invoke_without_command=True)

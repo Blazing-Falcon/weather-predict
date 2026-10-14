@@ -18,9 +18,10 @@ from pyproj import Proj
 from nowcast import config, http, paths
 from nowcast.cloud.features import features, valid_tb
 from nowcast.cloud.flow import CloudMotion
+from nowcast.gold.tiles import tile_path, write_bounds, write_cloud
 from nowcast.log import get_logger, redact
 from nowcast.parquet import write_table
-from nowcast.registry.grids import Grid, mergir_grid
+from nowcast.registry.grids import Grid, imerg_grid, mergir_grid
 from nowcast.sources.imerg import SLOT_LENGTH, UTC_US, _partition, _save_state, _scaled
 from nowcast.sources.mergir import CLOUD_SCHEMA
 from nowcast.zonal import Zonal
@@ -250,6 +251,7 @@ def _tick(state: Path, now: datetime) -> dict:
     source = config.settings()["himawari"]
     bronze = paths.zone("bronze") / "himawari"
     silver = paths.zone("silver") / "cloud_kabkota"
+    tiles = paths.zone("gold") / "tiles"
     cursor_path = state / "himawari_live.json"
     frame_path = state / "himawari_last_frame.npz"
     latency_path = state / "himawari_latency.jsonl"
@@ -265,11 +267,14 @@ def _tick(state: Path, now: datetime) -> dict:
                 last_record = json.loads(lines[-1])
 
     logger = get_logger(__name__)
-    grid = None
+    zonal = None
     previous = None
     reports = {}
     with http.client(timeout=15) as client, ThreadPoolExecutor(max_workers=3) as pool:
         ready = _ready_scans(client, now, last, source)
+        if ready:
+            grid = mergir_grid()
+            write_bounds(tiles, imerg_grid(), grid)
         for scan, ready_at, objects in ready:
             report = reports.setdefault(scan.strftime("%Y-%m"), {
                 "slots": 0, "bronze_bytes": 0, "rows": 0, "silver_bytes": 0,
@@ -283,27 +288,27 @@ def _tick(state: Path, now: datetime) -> dict:
             files = [download.result() for download in downloads]
             partition = silver / _partition(scan)
             model_slot = is_model_slot(scan)
-            if model_slot:
-                if grid is None:
-                    grid = mergir_grid()
-                    settings = config.settings()["mergir"]
-                    membership = pq.read_table(paths.zone("ref") / "mergir_membership.parquet")
-                    zonal = Zonal(membership, grid.width * grid.height)
-                    motion = CloudMotion(grid, settings["flow"])
-                    if frame_path.exists():
-                        with np.load(frame_path) as saved:
-                            previous = datetime.fromisoformat(saved["slot"].item()), saved["tb"]
-                # The rows were already written if a retry finds this scan's saved frame.
-                if previous is None or previous[0] != scan:
-                    tb = _decode(files, state / "himawari_index.npz", grid, source)
-                    rows = cloud_rows(scan, tb, previous, zonal, motion, settings["cold_k"])
-                    merge_scan(partition / PART, rows, scan)
-                    report["rows"] += rows.num_rows
-                    report["silver_bytes"] = (partition / PART).stat().st_size
-                    temp = frame_path.with_suffix(".tmp.npz")
-                    np.savez(temp, tb=tb, slot=scan.isoformat())
-                    temp.replace(frame_path)
-                    previous = scan, tb
+            if model_slot and zonal is None:
+                settings = config.settings()["mergir"]
+                membership = pq.read_table(paths.zone("ref") / "mergir_membership.parquet")
+                zonal = Zonal(membership, grid.width * grid.height)
+                motion = CloudMotion(grid, settings["flow"])
+                if frame_path.exists():
+                    with np.load(frame_path) as frame:
+                        previous = datetime.fromisoformat(frame["slot"].item()), frame["tb"]
+            # A saved frame for this scan means its feature rows were already published.
+            saved = previous is not None and previous[0] == scan
+            tb = previous[1] if saved else _decode(files, state / "himawari_index.npz", grid, source)
+            write_cloud(tile_path(tiles, "cloud", scan), tb)
+            if model_slot and not saved:
+                rows = cloud_rows(scan, tb, previous, zonal, motion, settings["cold_k"])
+                merge_scan(partition / PART, rows, scan)
+                report["rows"] += rows.num_rows
+                report["silver_bytes"] = (partition / PART).stat().st_size
+                temp = frame_path.with_suffix(".tmp.npz")
+                np.savez(temp, tb=tb, slot=scan.isoformat())
+                temp.replace(frame_path)
+                previous = scan, tb
 
             stats = [file.stat() for file in files]
             size = sum(stat.st_size for stat in stats)

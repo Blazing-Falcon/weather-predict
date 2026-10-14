@@ -23,9 +23,10 @@ import typer
 from numpy.typing import NDArray
 
 from nowcast import config, http, paths
+from nowcast.gold.tiles import tile_path, write_bounds, write_rain
 from nowcast.log import get_logger, redact
 from nowcast.parquet import write_table
-from nowcast.registry.grids import Grid, imerg_grid
+from nowcast.registry.grids import Grid, imerg_grid, mergir_grid
 from nowcast.sources import cmr
 from nowcast.zonal import Zonal
 
@@ -182,6 +183,7 @@ def write_month(
     zonal: Zonal,
     *,
     merge: bool = False,
+    tiles: Path | None = None,
 ) -> dict:
     slots = [granule.slot for granule in granules]
     versions = [granule.version for granule in granules]
@@ -195,6 +197,8 @@ def write_month(
     for index, granule in enumerate(granules):
         crop = bronze / f"{granule.title}.nc4"
         values = read_crop(crop, grid)
+        if tiles is not None:
+            write_rain(tile_path(tiles, "rain", granule.slot), values, grid)
         stat = crop.stat()
         fetched.append(datetime.fromtimestamp(stat.st_mtime, UTC))
         sizes.append(stat.st_size)
@@ -421,6 +425,8 @@ def _tick(state: Path, now: datetime) -> dict:
     reports = {}
     if granules:
         grid = imerg_grid()
+        tiles = paths.zone("gold") / "tiles"
+        write_bounds(tiles, grid, mergir_grid())
         membership = pq.read_table(paths.zone("ref") / "imerg_membership.parquet")
         zonal = Zonal(membership, grid.width * grid.height)
         parallel = _parallel()
@@ -432,7 +438,7 @@ def _tick(state: Path, now: datetime) -> dict:
             silver = paths.zone("silver") / "rain_kabkota" / partition
             progress = {"downloaded": 0, "failed": 0, "bytes": 0}
             download_month(batch, bronze, grid, parallel, progress)
-            stats = write_month(batch, bronze, silver, grid, zonal, merge=True)
+            stats = write_month(batch, bronze, silver, grid, zonal, merge=True, tiles=tiles)
             last = batch[-1].slot
             reports[last.strftime("%Y-%m")] = {
                 "slots": len(batch), "bronze_bytes": progress["bytes"],

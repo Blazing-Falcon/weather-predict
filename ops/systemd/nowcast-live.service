@@ -6,4 +6,5 @@ Type=oneshot
 WorkingDirectory=@REPO@
 Environment=TZ=UTC
 ExecStart=@UV@ run --frozen nowcast live score
+ExecStart=@UV@ run --frozen nowcast gold frames
 ExecStart=@UV@ run --frozen nowcast live verify

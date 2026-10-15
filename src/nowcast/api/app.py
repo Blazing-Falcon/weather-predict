@@ -9,6 +9,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Response
 from fastapi import Path as PathParam
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from nowcast import config, paths
 from nowcast.api import queries
@@ -162,3 +163,6 @@ def kabkota():
 @app.get("/geo/neighbours.geojson", summary="Get neighbouring land boundaries")
 def neighbours():
     return static_file(config.CONFIG_DIR / "geo" / "neighbours.geojson", "application/geo+json")
+
+
+app.mount("/", StaticFiles(directory=config.REPO_ROOT / "web", html=True), name="web")

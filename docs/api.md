@@ -1,17 +1,19 @@
 # Nowcast API
 
+FastAPI serves the seven-page web app at `/`. The app uses this API on the same origin. MapLibre GL JS 4.7.1 loads from cdnjs, with its CSS served locally. The map uses GeoJSON and archive rasters without a tile basemap.
+
 ## Page Data
 
 | Page | Data Needed | Endpoint |
 |---|---|---|
 | Map | Area and neighbouring outlines, area names and positions | `GET /geo/kabkota.geojson`, `GET /geo/neighbours.geojson`, `GET /api/meta` |
-| Map | Timeline, latest observation and issue markers, model probabilities, observed rain, cold-cloud share, BMKG rain and disagreement | `GET /api/meta`, `GET /api/frames?layer=prob3` (also `prob1`, `prob2`, `obs`, `cold`, `bmkg`, `disagree`) |
+| Map | Timeline, latest observation and issue markers, model probabilities, observed rain, cold-cloud share, BMKG rain and disagreement | `GET /api/meta`, `GET /api/frames?layer=prob3` (also `prob1`, `prob2`, `obs`, `cold`, `bmkg`, `disagree`), `GET /api/alerts?threshold=0` for the latest issue if its frame is pending |
 | Map | Raw rain image, cloud overlay and their bounds and available timestamps, METAR station markers | `GET /tiles/rain/{slot}.png`, `GET /tiles/cloud/{scan}.webp`, `GET /api/meta` |
-| Map | Area drawer and tooltip with rain, cloud-top temperature and cold share, forecasts, BMKG weather, local scores and climatology. National score table | `GET /api/areas/{area_id}`, `GET /api/scores?scope=national` |
-| Overview | Source freshness, area count, issue time, national rain and cold-cloud counts and trends, expected rain share and island breakdown | `GET /api/meta`, `GET /api/frames` (`obs`, `cold`, `prob3`). Aggregate over available areas and leave missing slots blank. |
+| Map | Area drawer and tooltip with rain, cloud-top temperature and cold share, forecasts, BMKG weather, local scores and climatology. National score table and processing totals | `GET /api/areas/{area_id}`, `GET /api/scores?scope=national&lead=3`, `GET /api/pipeline` |
+| Overview | Source freshness, area count, issue time, national rain and cold-cloud counts and trends, expected rain share and island breakdown | `GET /api/meta`, `GET /api/frames` (`obs`, `cold`, `prob1`–`prob3`). Aggregate over available areas and leave missing slots blank. |
 | Overview | Alert counts by level, ranked forecasts with cloud-top temperature and BMKG weather | `GET /api/alerts`. Use `threshold=0` for the full forecast ranking and the selected threshold for counts. |
-| Alerts | Issue time, level, area names and location filters, probabilities by lead, cloud-top temperature, cold share and BMKG weather. Name search and watch filtering use the returned rows. | `GET /api/alerts?level=&island=&province=&threshold=`, `GET /api/meta` |
-| Model | Training and test periods, metrics and baselines, calibration, importance, thresholds and version history. Live verification CSI by local hour and island | `GET /api/model`, `GET /api/scores?scope=island` for daily scores |
+| Alerts | Issue time, level, area names and location filters, probabilities by lead, cloud-top temperature, cold share and BMKG weather. Level, island, province, name and watch filters use the returned rows. | `GET /api/alerts?threshold=`, `GET /api/meta` |
+| Model | Training and test periods, metrics and baselines, calibration, importance, thresholds and version history. Live verification CSI by local hour and island | `GET /api/model` |
 | History | Area comparison selector, local month × hour heatmap, monthly and annual rainfall, wet-season timing and archive coverage | `GET /api/meta`, `GET /api/history/{area_id}` for each selected area |
 | Pipeline | Job health, recent Dagster runs, source availability and latency, disk use and retention caps, processed grid values and retained silver bytes, measured backfill progress | `GET /api/pipeline`, `GET /api/meta` |
 | Settings | Area names for the watch list, METAR stations and alert threshold | `GET /api/meta`, `GET /api/alerts?threshold=`. Theme, threshold preference, initial zoom, opacity, gauge visibility and watch list stay in browser storage. |
@@ -30,6 +32,15 @@ The pipeline diagram and page labels are UI content. The mockup's generated fore
 - `/api/model` returns the full newest card and the cards' test Brier skill by lead. The live CSI charts cover the last 30 days of available verification and use a 50% cutoff, grouped by local issue hour or island.
 - `/api/history/{area_id}` groups rain totals by local calendar month and year, using UTC if the area's time zone is unavailable. A half-hour at `rain_mean_x10 = 10` contributes 0.5 mm. Slot counts show how much data contributes to each total. Climatology reports the archived mean spatial wet share and event probabilities `p1`–`p3` by local month and hour. Wet-season years with insufficient rain to meet the onset rule have null onset. The reported last wet dekad reflects only the available archive.
 - `/api/pipeline` reports configured retention caps and measured disk bytes. Its processed counts multiply distinct retained IMERG slots or MERGIR frames by the configured source grid size. Its latency median and p90 use arrival records from the last 24 hours. It also reports the most recent latency record, even when older, and up to 20 runs from the local Dagster SQLite run database.
-- Static files and frame requests ending more than six hours ago use `Cache-Control: public, max-age=86400`. Live API responses use `public, max-age=60`. Meta and pipeline snapshots are held in memory for 60 seconds. Responses support gzip and use the same origin.
+- GeoJSON, raster tiles, and frame requests ending more than six hours ago use `Cache-Control: public, max-age=86400`. Live API responses use `public, max-age=60`. Meta and pipeline snapshots are held in memory for 60 seconds. Responses support gzip and use the same origin.
 
 Run `uv run nowcast api` to serve on `127.0.0.1:8000`. Use `--host`, `--port` and `--reload` to override the defaults. Interactive API documentation is at `/docs`. Run `uv run python experiments/05_api_timing.py` while the server is running to measure median and p95 request times.
+
+## Web App Behavior
+
+- The map uses half-hour steps from 48 hours before the latest model issue to three hours after it. If no issue exists, the current half-hour from `as_of` anchors the slider. Display times use WIB. The IMERG gap starts at `latest_observed_slot`. For the +30 and +60 minute ticks, the map uses the one-hour probability from the latest issue. It uses the two- and three-hour probabilities for the subsequent pairs of ticks.
+- When a model issue exists before its gold frames have been built, the app uses the lead probabilities from the matching issue in `/api/alerts?threshold=0`. Historical map frames use `/api/frames`. The BMKG and disagreement layers show the rain flag and binary disagreement respectively.
+- The raw rain tile uses an exact slot match. The cloud overlay uses the newest available scan within the preceding half hour, including the selected slot, and stops after the issue. Each canvas uses its own dimensions and bounds from `tile_bounds`.
+- No API response fields were added for the web app.
+
+With the API running, run `uv run python experiments/06_web_check.py` to capture and check the seven views at desktop and phone sizes. It uses Playwright 1.62.0 with Chromium revision 1234 and writes to `DATA_ROOT/tmp/web-shots/`.

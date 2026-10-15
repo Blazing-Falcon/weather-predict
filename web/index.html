@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Kab/Kota Rain Nowcast</title>
+  <link rel="stylesheet" href="/maplibre.css">
+  <link rel="stylesheet" href="/style.css">
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/4.7.1/maplibre-gl.js"></script>
+  <script defer src="/app.js"></script>
+</head>
+<body>
+<header class="top gutter">
+  <div class="brand"><b>~/</b>rain-nowcast</div>
+  <nav class="tabs" aria-label="Views">
+    <a href="#map" data-view="map">Map</a>
+    <a href="#overview" data-view="overview">Overview</a>
+    <a href="#alerts" data-view="alerts">Alerts<span class="n" id="alertN"></span></a>
+    <a href="#model" data-view="model">Model</a>
+    <a href="#history" data-view="history">History</a>
+    <a href="#pipeline" data-view="pipeline">Pipeline</a>
+    <a href="#settings" data-view="settings">Settings</a>
+  </nav>
+</header>
+
+<main>
+<p id="dataStatus" class="note" role="status" hidden></p>
+<!-- ================= MAP ================= -->
+<section class="view" id="view-map">
+  <div class="stage">
+    <div id="map" role="region" aria-label="Rain map of Indonesia by kab/kota"></div>
+    <div class="loading" id="loading">Loading map data…</div>
+    <div id="tip" hidden></div>
+    <div class="banner" id="banner" role="status" hidden></div>
+    <div class="ov ov-left">
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><span class="live" id="sourceStatus"><i></i><span id="sourceState">LOADING</span></span><span class="note mono" id="mapIssue"></span></div>
+        <dl class="kv">
+          <dt>Himawari-9 frame</dt><dd id="mapCloud">—</dd>
+          <dt>IMERG rain slot</dt><dd id="mapRain">—</dd>
+          <dt>Latest BMKG run</dt><dd id="mapBmkg">—</dd>
+          <dt>Values processed</dt><dd id="procN">—</dd>
+          <dt>Stored on disk</dt><dd id="mapDisk">—</dd>
+        </dl>
+      </div>
+      <div class="card">
+        <span class="label">Layer</span>
+        <div class="layers" id="layers">
+          <label><input type="radio" name="layer" value="fc" checked>Our forecast<small>next 3 h</small></label>
+          <label><input type="radio" name="layer" value="bm">BMKG forecast<small>3-h step</small></label>
+          <label><input type="radio" name="layer" value="ob">Observed rain<small>IMERG</small></label>
+          <label><input type="radio" name="layer" value="ds">Model vs BMKG<small>disagree</small></label>
+        </div>
+        <label class="toggle"><input type="checkbox" id="cloudsOn" checked>Clouds · Himawari-9 infrared</label>
+        <label class="toggle disabled" id="rawWrap"><input type="checkbox" id="raw" disabled>Raw rain grid (0.1°)</label>
+        <div class="btnrow" role="group" aria-label="Zoom to">
+          <button type="button" class="btn" data-z="id" aria-pressed="true">Indonesia</button>
+          <button type="button" class="btn" data-z="jawa" aria-pressed="false">Jawa</button>
+          <button type="button" class="btn" data-z="jatim" aria-pressed="false">Jawa Timur</button>
+        </div>
+      </div>
+      <div class="card">
+        <span class="label" id="legTitle"></span>
+        <div class="legend" id="legend"></div>
+        <p class="note" id="layerNote" hidden></p>
+        <p class="note" id="cloudTileNote" hidden>No cloud image archived for this time.</p>
+        <p class="note" id="rainTileNote" hidden>No raw rain image archived for this time.</p>
+        <div class="legend" id="cloudLeg"><div class="row"><span class="note" style="white-space:nowrap">clouds</span><span class="cloudramp" id="cloudRamp"></span><span class="note" style="white-space:nowrap">cold tops</span></div></div>
+        <p class="attr">Forecast: BMKG. NASA GES DISC: IMERG, MERGIR. NOAA: Himawari-9 on AWS, GHCNh. METAR rings: aviationweather.gov. geoBoundaries (CC BY 3.0 IGO) and Natural Earth.</p>
+      </div>
+    </div>
+    <div class="ov ov-right">
+      <div class="card" id="national">
+        <div class="phead"><h2>Scoreboard</h2><span class="note">Latest verified day · all areas</span></div>
+        <table><thead><tr><th>Forecast</th><th class="num">CSI</th><th class="num">Caught</th><th class="num">False</th></tr></thead><tbody id="natBody"></tbody></table>
+        <p class="note">Scored against IMERG rain. CSI is hits ÷ (hits + misses + false alarms). Caught is the share of rainy windows forecast. False is the share of rain forecasts that stayed dry. Click an area for its own panel.</p>
+      </div>
+      <div class="card" id="drawer" hidden>
+        <div class="drawer-head"><div><span class="label" id="dIsland">kab/kota</span><h2 id="dName"></h2></div><button type="button" class="x" id="dClose" aria-label="Close area panel">×</button></div>
+        <div class="now4" id="dNow"></div>
+        <div><span class="label">48 h back · 3 h ahead</span><svg id="dChart" viewBox="0 0 340 214" style="width:100%;display:block" role="img" aria-label="Area timeline"></svg></div>
+        <p class="note" id="dDetail" aria-live="polite"></p><div style="display:flex;gap:8px;flex-wrap:wrap"><a href="#history" class="btn" id="dHist" style="text-decoration:none">Rain history</a><button type="button" class="btn" id="dWatch" aria-pressed="false">☆ Watch</button></div>
+      </div>
+    </div>
+    <div class="ov ov-bottom">
+      <div class="card slider">
+        <button type="button" class="play" id="play" aria-label="Play">▶</button>
+        <div class="track">
+          <div class="trackbar"><div class="deco" id="deco"></div><input type="range" id="frame" min="0" max="102" step="1" value="96" aria-label="Time"></div>
+          <div class="ticks" id="ticks"></div>
+        </div>
+        <div class="when"><span class="t" id="wT"></span><span class="s" id="wS"></span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= OVERVIEW ================= -->
+<section class="view" id="view-overview" hidden><div class="page gutter">
+  <div class="page-head"><h1>Indonesia right now</h1><span class="note mono" id="ovTime"></span></div>
+  <div class="grid" id="ovTiles"></div>
+  <div class="grid">
+    <div class="panel s8"><div class="phead"><h2>Share of kab/kota with rain</h2><span class="note">48 h back, 3 h ahead</span></div>
+      <svg id="ovShare" viewBox="0 0 760 230" style="width:100%;display:block" role="img" aria-label="Share of areas with rain over time"></svg>
+      <div class="legendh"><span><i style="background:var(--aqua)"></i>Observed rain (IMERG)</span><span><i style="background:var(--fg)"></i>Under cold cloud (Himawari)</span><span><i style="background:var(--blue)"></i>Our expected share</span></div>
+    </div>
+    <div class="panel s4"><div class="phead"><h2>Data freshness</h2><span class="note"><span id="freshTime"></span></span></div>
+      <div class="fresh" id="fresh"></div>
+      <p class="note">The model uses recent Himawari-9 scans while it waits for IMERG.</p>
+    </div>
+    <div class="panel s5"><div class="phead"><h2>Rain likely next 3 h, by island</h2><span class="note">share of kab/kota</span></div><svg id="ovIsland" viewBox="0 0 460 230" style="width:100%;display:block" role="img" aria-label="Share of areas with likely rain by island"></svg></div>
+    <div class="panel s7"><div class="phead"><h2>Wettest kab/kota next 3 h</h2><a href="#alerts" class="note">all alerts →</a></div><div class="scroll-x"><table><thead><tr><th>Kab/kota</th><th>Island</th><th>Our model</th><th class="num">Cloud top</th><th>BMKG</th></tr></thead><tbody id="ovTop"></tbody></table></div></div>
+  </div>
+</div></section>
+
+<!-- ================= ALERTS ================= -->
+<section class="view" id="view-alerts" hidden><div class="page gutter">
+  <div class="page-head"><h1>Rain alerts</h1><span class="note" id="alTime"></span></div>
+  <p class="lede">Areas where our model expects rain within one, two or three hours. Levels follow BMKG's warning names: Waspada at the threshold set in Settings, Siaga at 70% or more, Awas at 85% or more with very cold cloud tops (−70 °C or colder).</p>
+  <div class="panel">
+    <div class="filters">
+      <input type="search" id="alQ" placeholder="Search kab/kota" aria-label="Search kab/kota">
+      <select id="alIsland" aria-label="Island"><option value="">All islands</option></select>
+      <select id="alProvince" aria-label="Province"><option value="">All provinces</option></select>
+      <select id="alLvl" aria-label="Minimum level"><option value="1">Waspada and up</option><option value="2">Siaga and up</option><option value="3">Awas only</option></select>
+      <label class="toggle"><input type="checkbox" id="alWatch">Watch list only</label>
+      <span class="note" id="alCount" style="margin-left:auto"></span>
+    </div>
+    <div class="scroll-x"><table><thead><tr><th></th><th>Level</th><th>Kab/kota</th><th>Island</th><th class="num">+1 h</th><th class="num">+2 h</th><th class="num">+3 h</th><th class="num">Cloud top</th><th class="num">Cold cloud</th><th>BMKG</th><th></th></tr></thead><tbody id="alBody"></tbody></table></div>
+  </div>
+</div></section>
+
+<!-- ================= MODEL ================= -->
+<section class="view" id="view-model" hidden><div class="page gutter">
+  <div class="page-head"><h1>How good is the model?</h1><span class="sample">+3 h forecast</span></div>
+  <p class="lede">LightGBM uses satellite cloud tops and IMERG Early rain. The test scores come from the archived model card. The live charts use verified forecasts from the last 30 days.</p>
+  <p class="note" id="mdSplit"></p>
+  <div class="grid" id="mdTiles"></div>
+  <p class="note" id="mdLive"></p>
+  <div class="grid">
+    <div class="panel s6"><div class="phead"><h2>Calibration</h2><span class="note">does 70% rain 70% of the time?</span></div><svg id="mdCal" viewBox="0 0 460 300" style="width:100%;display:block" role="img" aria-label="Reliability diagram"></svg></div>
+    <div class="panel s6"><div class="phead"><h2>Hit score (CSI) by hour of day</h2><span class="note">Local issue hour · 50% cutoff</span></div><svg id="mdHour" viewBox="0 0 460 300" style="width:100%;display:block" role="img" aria-label="CSI by hour"></svg>
+      <div class="legendh"><span><i style="background:var(--blue)"></i>Our model</span><span><i style="background:var(--purple)"></i>Cloud motion only</span><span><i style="background:var(--gray)"></i>Same as IMERG now</span></div></div>
+    <div class="panel s6"><div class="phead"><h2>Hit score (CSI) by island</h2></div><svg id="mdIsland" viewBox="0 0 460 260" style="width:100%;display:block" role="img" aria-label="CSI by island"></svg>
+      <div class="legendh"><span><i style="background:var(--blue)"></i>Our model</span><span><i style="background:var(--purple)"></i>Cloud motion only</span></div></div>
+    <div class="panel s6"><div class="phead"><h2>What the model looks at</h2><span class="sample">Model card</span></div><svg id="mdFeat" viewBox="0 0 460 260" style="width:100%;display:block" role="img" aria-label="Feature importance"></svg><p class="note">Gain share from the trained LightGBM. Purple bars mark cloud-motion features.</p></div>
+    <div class="panel s12"><div class="phead"><h2>Does cloud motion help?</h2><span class="note">Test period · lower Brier is better</span></div><div class="scroll-x"><table><thead><tr><th>Forecast</th><th class="num">Brier</th><th class="num">Brier skill</th><th class="num">CSI</th><th class="num">AUC</th></tr></thead><tbody id="mdRuns"></tbody></table></div>
+      <p class="note" id="mdRunsNote"></p></div>
+  </div>
+  <div class="panel"><div class="phead"><h2>Model versions</h2><span class="note">Test Brier skill</span></div><div class="scroll-x"><table><thead><tr><th>Version</th><th>Created (WIB)</th><th class="num">+1 h</th><th class="num">+2 h</th><th class="num">+3 h</th></tr></thead><tbody id="mdVersions"></tbody></table></div></div>
+</div></section>
+
+<!-- ================= HISTORY ================= -->
+<section class="view" id="view-history" hidden><div class="page gutter">
+  <div class="page-head"><h1>Rain history</h1><span class="sample"><span id="hCoverage">Archive coverage</span></span></div>
+  <div class="filters"><label class="note" for="hA">Area</label><select id="hA"></select><label class="note" for="hB">Compare with</label><select id="hB"><option value="">Nothing</option></select></div>
+  <div class="grid">
+    <div class="panel s7"><div class="phead"><h2 id="hHeatT">When it rains</h2><span class="note"><span id="hPeriod">Mean wet share by local hour</span></span></div><svg id="hHeat" viewBox="0 0 600 260" style="width:100%;display:block" role="img" aria-label="Rain frequency by month and hour"></svg><p class="note" id="hHeatNote"></p></div>
+    <div class="panel s5"><div class="phead"><h2>Yearly rain</h2><span class="note">mm per year</span></div><svg id="hYear" viewBox="0 0 440 260" style="width:100%;display:block" role="img" aria-label="Yearly rain totals"></svg><div class="legendh" id="hYearLeg"></div><p class="note">Totals cover archived slots only. ENSO labels are unavailable.</p></div>
+    <div class="panel s12"><div class="phead"><h2>Wet season start and end</h2><span class="note">Onset month and last observed wet dekad</span></div><svg id="hSeason" viewBox="0 0 1200 220" style="width:100%;display:block" role="img" aria-label="Wet season timing per year"></svg><p class="note" id="hRule"></p></div>
+  </div>
+  <div class="panel"><details><summary>Monthly rain and archive coverage</summary><div class="scroll-x"><table><thead><tr><th>Area</th><th>Month</th><th class="num">Rain (mm)</th><th class="num">30-min slots</th></tr></thead><tbody id="hMonths"></tbody></table></div></details></div>
+</div></section>
+
+<!-- ================= PIPELINE ================= -->
+<section class="view" id="view-pipeline" hidden><div class="page gutter">
+  <div class="page-head"><h1>How the data flows</h1></div>
+  <p class="lede">Satellite, forecast and gauge feeds land on the homelab. Sensors start the speed layer when new data arrives. The batch layer keeps per-area summaries of the IMERG archive. The web app reads the gold tables.</p>
+  <div class="panel"><div class="scroll-x">
+  <svg class="dg" viewBox="0 0 1250 580" style="width:100%;min-width:1000px;display:block" role="img" aria-label="Pipeline diagram">
+    <defs>
+      <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" style="fill:var(--gray)"/></marker>
+      <marker id="arb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" style="fill:var(--blue)"/></marker>
+    </defs>
+    <rect class="band-speed" x="8" y="42" width="1062" height="292" rx="8"/>
+    <rect class="band-batch" x="8" y="382" width="1062" height="190" rx="8"/>
+    <text class="bandl" x="200" y="326">SPEED LAYER · EVERY NEW FILE</text>
+    <text class="bandl" x="20" y="564">BATCH LAYER · HISTORY AND TRAINING</text>
+    <g><text class="col" x="20" y="28">SOURCES</text><text class="col" x="195" y="28">INGEST</text><text class="col" x="370" y="28">BRONZE · RAW</text><text class="col" x="545" y="28">SILVER · CLEAN</text><text class="col" x="720" y="28">GOLD · READY</text><text class="col" x="905" y="28">MODEL</text><text class="col" x="1090" y="28">SERVE</text></g>
+    <rect class="gold" x="711" y="50" width="168" height="508" rx="8"/>
+
+    <rect class="box" x="20" y="60" width="150" height="52" rx="5"/><text class="t" x="31" y="82">BMKG API</text><text class="s" x="31" y="99">519 kab/kota · 3-h</text>
+    <rect class="box new" x="20" y="140" width="150" height="52" rx="5"/><text class="t" x="31" y="162">Himawari-9 raw</text><text class="s" x="31" y="179">Band 13 · NOAA AWS</text>
+    <rect class="box" x="20" y="220" width="150" height="52" rx="5"/><text class="t" x="31" y="242">IMERG Early</text><text class="s" x="31" y="259">OPeNDAP crop · 30 min</text>
+    <rect class="box" x="20" y="286" width="150" height="40" rx="5" style="stroke-dasharray:4 3"/><text class="t" x="31" y="303">GSMaP_NOW</text><text class="s" x="31" y="318">optional · untested</text>
+    <rect class="box" x="20" y="400" width="150" height="52" rx="5"/><text class="t" x="31" y="422">IMERG archive</text><text class="s" x="31" y="439">Early run · monthly</text>
+    <rect class="box new" x="20" y="480" width="150" height="52" rx="5"/><text class="t" x="31" y="502">GHCNh gauges</text><text class="s" x="31" y="519">airport weather codes</text>
+
+    <rect class="box" x="195" y="60" width="150" height="52" rx="5"/><text class="t" x="206" y="82">ingest_bmkg</text><text class="s" x="206" y="99">schedule · every 3 h</text>
+    <rect class="box new" x="195" y="140" width="150" height="52" rx="5"/><text class="t" x="206" y="162">sensor_himawari</text><text class="s" x="206" y="179">polls S3 every 2 min</text>
+    <rect class="box hot" x="195" y="220" width="150" height="52" rx="5"/><text class="t" x="206" y="242">sensor_imerg</text><text class="s" x="206" y="259">polls every 5 min</text>
+    <rect class="box" x="195" y="400" width="150" height="52" rx="5"/><text class="t" x="206" y="422">backfill_imerg</text><text class="s" x="206" y="439">month by month</text>
+    <rect class="box new" x="195" y="480" width="150" height="52" rx="5"/><text class="t" x="206" y="502">backfill_gauges</text><text class="s" x="206" y="519">yearly files</text>
+
+    <rect class="box" x="370" y="60" width="150" height="52" rx="5"/><text class="t" x="381" y="82">bronze/bmkg</text><text class="s" x="381" y="99">retained JSON</text>
+    <rect class="box" x="370" y="140" width="150" height="52" rx="5"/><text class="t" x="381" y="162">bronze/himawari</text><text class="s" x="381" y="179">short raw window</text>
+    <rect class="box" x="370" y="220" width="150" height="52" rx="5"/><text class="t" x="381" y="242">bronze/imerg</text><text class="s" x="381" y="259">grids · 7 days</text>
+    <rect class="box" x="370" y="400" width="150" height="52" rx="5"/><text class="t" x="381" y="422">tmp download</text><text class="s" x="381" y="439">cropped grids · deleted</text>
+
+    <rect class="box" x="545" y="60" width="150" height="52" rx="5"/><text class="t" x="556" y="82">forecasts</text><text class="s" x="556" y="99">area · run · lead</text>
+    <rect class="box new" x="545" y="140" width="150" height="52" rx="5"/><text class="t" x="556" y="162">cloud_kabkota</text><text class="s" x="556" y="179">cold share + motion</text>
+    <rect class="box hot" x="545" y="220" width="150" height="52" rx="5"/><text class="t" x="556" y="242">grid_cells</text><text class="s" x="556" y="259">30 days · land only</text>
+    <rect class="box" x="545" y="310" width="150" height="52" rx="5"/><text class="t" x="556" y="332">rain_kabkota</text><text class="s" x="556" y="349">10 yr · int16 · ZSTD</text>
+    <rect class="box new" x="545" y="480" width="150" height="52" rx="5"/><text class="t" x="556" y="502">gauge_hourly</text><text class="s" x="556" y="519">rain yes/no per airport</text>
+
+    <rect class="box hot" x="720" y="60" width="150" height="52" rx="5"/><text class="t" x="731" y="82">map_frames</text><text class="s" x="731" y="99">7 days · per layer</text>
+    <rect class="box" x="720" y="140" width="150" height="52" rx="5"/><text class="t" x="731" y="162">scoreboard</text><text class="s" x="731" y="179">forecast vs truth</text>
+    <rect class="box" x="720" y="310" width="150" height="52" rx="5"/><text class="t" x="731" y="332">features</text><text class="s" x="731" y="349">built, not stored</text>
+    <rect class="box" x="720" y="480" width="150" height="52" rx="5"/><text class="t" x="731" y="502">climatology</text><text class="s" x="731" y="519">month × hour</text>
+
+    <rect class="box hot" x="905" y="310" width="150" height="52" rx="5"/><text class="t" x="916" y="332">score_now</text><text class="s" x="916" y="349">+1 / +2 / +3 h</text>
+    <rect class="box" x="905" y="400" width="150" height="52" rx="5"/><text class="t" x="916" y="422">train_lightgbm</text><text class="s" x="916" y="439">Spark features · weekly</text>
+
+    <rect class="box hot" x="1090" y="60" width="150" height="472" rx="5"/>
+    <text class="t" x="1102" y="84">Web app</text><text class="s" x="1102" y="102">FastAPI + DuckDB</text><text class="s" x="1102" y="117">MapLibre GL JS</text>
+    <text class="s" x="1102" y="150">· live map + clouds</text><text class="s" x="1102" y="166">· overview</text><text class="s" x="1102" y="182">· alerts</text><text class="s" x="1102" y="198">· model</text><text class="s" x="1102" y="214">· history</text><text class="s" x="1102" y="230">· pipeline</text>
+    <text class="s" x="1102" y="518">Same-origin API</text>
+    <g>
+      <path class="edge" d="M170 86H193" marker-end="url(#ar)"/><path class="edge" d="M345 86H368" marker-end="url(#ar)"/><path class="edge" d="M520 86H543" marker-end="url(#ar)"/>
+      <path class="edge" d="M170 166H193" marker-end="url(#ar)"/><path class="edge" d="M345 166H368" marker-end="url(#ar)"/><path class="edge" d="M520 166H543" marker-end="url(#ar)"/>
+      <path class="edge" d="M170 246H193" marker-end="url(#ar)"/><path class="edge" d="M345 246H368" marker-end="url(#ar)"/><path class="edge" d="M520 246H543" marker-end="url(#ar)"/>
+      <path class="edge" d="M170 426H193" marker-end="url(#ar)"/><path class="edge" d="M345 426H368" marker-end="url(#ar)"/><path class="edge" d="M520 426H532V342H543" marker-end="url(#ar)"/>
+      <path class="edge" d="M620 272V308" marker-end="url(#ar)"/>
+      <path class="edge" d="M620 362V372H704V506H718" marker-end="url(#ar)"/>
+      <path class="edge" d="M170 506H193" marker-end="url(#ar)"/><path class="edge" d="M345 506H543" marker-end="url(#ar)"/><path class="edge" d="M695 520H710V176H718" marker-end="url(#ar)"/><text class="el" x="604" y="548">gauge check</text>
+      <path class="edge" d="M170 306H182V262H193" marker-end="url(#ar)" style="stroke-dasharray:4 3"/>
+      <line class="bus" x1="704" y1="86" x2="704" y2="336"/>
+      <path class="edge" d="M695 86H703"/><path class="edge" d="M695 166H703"/><path class="edge" d="M695 336H703"/>
+      <path class="edge" d="M705 86H718" marker-end="url(#ar)"/><path class="edge" d="M705 166H718" marker-end="url(#ar)"/><path class="edge" d="M705 336H718" marker-end="url(#ar)"/>
+      <path class="edge" d="M870 336H903" marker-end="url(#ar)"/>
+      <path class="edge" d="M795 362V426H903" marker-end="url(#ar)"/>
+      <path class="edge" d="M980 400V364" marker-end="url(#ar)"/><text class="el" x="988" y="388">model file</text>
+      <path class="edge pred" d="M980 310V250H882" marker-end="url(#arb)"/><text class="el" x="900" y="244" style="fill:var(--blue)">predictions</text>
+      <path class="edge" d="M879 506H1088" marker-end="url(#ar)"/><text class="el" x="940" y="498">API reads gold</text>
+    </g>
+  </svg></div></div>
+  <div class="grid">
+    <div class="panel s6"><div class="phead"><h2>Processed vs stored</h2><span class="note">Retained archive</span></div>
+      <svg id="plStore" viewBox="0 0 520 240" style="width:100%;display:block" role="img" aria-label="Storage per layer"></svg>
+      <p class="note" id="plTotals"></p><details><summary>Storage by dataset</summary><div class="scroll-x"><table><thead><tr><th>Dataset</th><th>Stored</th><th>Retention</th></tr></thead><tbody id="plCaps"></tbody></table></div></details></div>
+    <div class="panel s6"><div class="phead"><h2>Pipeline health</h2><span class="sample">Recent Dagster runs · WIB</span></div><div class="scroll-x"><table><thead><tr><th>Job</th><th>Started</th><th class="num">Took</th><th>Status</th></tr></thead><tbody id="runBody"></tbody></table></div></div>
+  </div>
+  <div class="panel"><div class="phead"><h2>Source availability and latency</h2><span class="note">WIB · arrivals over the last 24 h</span></div>
+    <div class="scroll-x"><table><thead><tr><th>Source</th><th>Latest data</th><th>Last latency</th><th>Median</th><th>P90</th></tr></thead><tbody id="plLatency"></tbody></table></div>
+    <div class="fresh" id="plHealth"></div>
+  </div>
+  <div class="panel"><div class="phead"><h2>IMERG backfill, measured</h2></div>
+    <div class="scroll-x"><table><thead><tr><th>Month</th><th>Archived slots</th><th>Expected</th><th>Silver stored</th><th>Status</th></tr></thead><tbody id="plBackfill"></tbody></table></div>
+  </div>
+  <h2>What each stage does</h2>
+  <div class="stages">
+    <div class="panel stage-c"><span class="label">Ingest</span><h3>Run when data lands</h3><span class="when2">Himawari every 10 min · IMERG every 30 min · BMKG every 3 h</span><p>Dagster sensors check for the next file and start the chain the moment it exists. Himawari comes as raw Band 13 from NOAA's public AWS bucket, about 12 min after each scan, and only the 2 or 3 segments over Indonesia are read. NASA's OPeNDAP service crops IMERG Early to the Indonesia box. BMKG runs on a schedule and skips runs it already has, using <code>analysis_date</code>. BMKG does not publish past runs, so every run is archived from day one to score it.</p></div>
+    <div class="panel stage-c"><span class="label">Bronze</span><h3>Short raw window</h3><span class="when2">Cropped to the Indonesia box</span><p>Retention caps vary by source. The storage chart shows the limits from the API.</p></div>
+    <div class="panel stage-c"><span class="label">Silver</span><h3>Summaries per area</h3><span class="when2">PySpark for history · DuckDB live</span><p><code>cloud_kabkota</code> holds the coldest cloud top and cold-cloud share per area every 10 min. <code>rain_kabkota</code> holds mean, max cell and wet share per area per 30 min. <code>grid_cells</code> keeps 30 days of land cells. Optical flow on the Band 13 field moves today's cold cloud forward and stores the expected cold-cloud share per area at +1, +2 and +3 h. <code>gauge_hourly</code> turns GHCNh airport weather codes into rain yes/no, as an independent check on IMERG.</p></div>
+    <div class="panel stage-c"><span class="label">Gold</span><h3>Built for the app</h3><span class="when2">after each silver update</span><p><code>map_frames</code> has one row per area, slot and layer for the last 7 days, so the slider never waits. <code>features</code> is built when the model needs it and never written to disk.</p></div>
+    <div class="panel stage-c"><span class="label">Model</span><h3>Train weekly, score every slot</h3><span class="when2">LightGBM · +1, +2, +3 h</span><p>Spark builds the training rows and LightGBM trains on one node. It trains on IMERG Early history, the same product that arrives live, and retrains when NASA moves Early to V08. Fresh Himawari cloud tops and their motion cover the time before IMERG arrives. Predictions are stored before the truth exists, so the scoreboard is fair.</p></div>
+    <div class="panel stage-c"><span class="label">Serve</span><h3>Map-first web app</h3><span class="when2">FastAPI + DuckDB · MapLibre GL JS</span><p>The API reads archived frames from Parquet. Cloud frames are served as small WebP images that the browser tints in the gruvbox palette.</p></div>
+  </div>
+</div></section>
+
+<!-- ================= SETTINGS ================= -->
+<section class="view" id="view-settings" hidden><div class="page gutter" style="max-width:820px">
+  <div class="page-head"><h1>Settings</h1><span class="note">saved in this browser only</span></div>
+  <div class="panel settings">
+    <div class="setrow"><div><div class="h">Theme</div><div class="d">Gruvbox dark or light. System follows your device.</div></div><div class="seg" role="group" aria-label="Theme"><button type="button" class="btn" data-theme-set="system">System</button><button type="button" class="btn" data-theme-set="dark">Dark</button><button type="button" class="btn" data-theme-set="light">Light</button></div></div>
+    <div class="setrow"><div><div class="h">Alert threshold</div><div class="d">Lowest chance of rain that counts as Waspada.</div></div><select id="setThr" aria-label="Alert threshold"><option value="0.5">50%</option><option value="0.6">60%</option><option value="0.7">70%</option></select></div>
+    <div class="setrow"><div><div class="h">Map opens on</div><div class="d">Starting zoom for the live map.</div></div><select id="setZoom" aria-label="Starting zoom"><option value="id">Indonesia</option><option value="jawa">Jawa</option><option value="jatim">Jawa Timur</option></select></div>
+    <div class="setrow"><div><div class="h">Cloud opacity</div><div class="d">How strongly Himawari clouds cover the map.</div></div><input type="range" id="setCloud" min="0.2" max="1" step="0.05" value="0.65" aria-label="Cloud opacity" style="width:180px"></div>
+    <div class="setrow"><div><div class="h">Airport gauges</div><div class="d"><span id="setGaugeD">Show METAR airports as rings.</span></div></div><label class="toggle"><input type="checkbox" id="setGauges" checked>Show</label></div>
+    <div class="setrow"><div><div class="h">Watch list</div><div class="d" id="setWatchD"></div></div><button type="button" class="btn" id="setWatchClear">Clear</button></div>
+  </div>
+  <footer class="note">Forecast source: BMKG. NASA GES DISC: IMERG and MERGIR. NOAA: Himawari-9 on AWS and GHCNh. METAR: aviationweather.gov. Boundaries: geoBoundaries (CC BY 3.0 IGO). Coastlines: Natural Earth.</footer>
+</div></section>
+</main>
+
+</body>
+</html>

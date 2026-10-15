@@ -269,10 +269,19 @@ def meta(archive, now):
     }
     areas = archive.areas()
     model_cards = cards(root)
+    reporting = {
+        row["station_id"]
+        for row in archive.rows(
+            GAUGE,
+            "SELECT DISTINCT station_id FROM data WHERE source = 'metar' AND obs_time >= ?",
+            [now - timedelta(hours=24)],
+        )
+    }
     with (config.CONFIG_DIR / "geo" / "metar_stations.csv").open(encoding="utf-8") as source:
         gauges = [
             {**row, "lat": float(row["lat"]), "lon": float(row["lon"])}
             for row in csv.DictReader(source)
+            if row["icao"] in reporting
         ]
     return {
         "as_of": now,

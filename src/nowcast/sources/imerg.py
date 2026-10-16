@@ -497,6 +497,37 @@ def _tick(state: Path, now: datetime) -> dict:
     return reports
 
 
+def _fill(start: datetime, end: datetime) -> int:
+    entries = cmr.granules(config.settings()["imerg"]["collection"], start, end)
+    granules = select_granules(entries, start, end)
+    grid = imerg_grid()
+    tiles = paths.zone("gold") / "tiles"
+    write_bounds(tiles, grid, mergir_grid())
+    zonal = Zonal(pq.read_table(paths.zone("ref") / "imerg_membership.parquet"),
+                  grid.width * grid.height)
+    months: dict[Path, list[Granule]] = {}
+    for granule in granules:
+        months.setdefault(_partition(granule.slot), []).append(granule)
+    for partition, batch in months.items():
+        bronze = paths.zone("bronze") / "imerg" / partition
+        download_month(batch, bronze, grid, _parallel(), {"downloaded": 0, "failed": 0, "bytes": 0})
+        write_month(batch, bronze, paths.zone("silver") / "rain_kabkota" / partition,
+                    grid, zonal, merge=True, tiles=tiles)
+    return len(granules)
+
+
+def fill(
+    start: Annotated[str, typer.Option(help="UTC start (ISO).")],
+    end: Annotated[str, typer.Option(help="UTC end (ISO).")],
+) -> None:
+    """Merge past slots into silver and draw their tiles, without touching the live cursor."""
+    state = paths.zone("state")
+    with (state / "imerg.lock").open("a") as lock:
+        flock(lock, LOCK_EX)
+        count = _fill(datetime.fromisoformat(start), datetime.fromisoformat(end))
+    get_logger(__name__).info("IMERG fill slots=%d", count)
+
+
 def tick() -> dict:
     try:
         state = paths.zone("state")

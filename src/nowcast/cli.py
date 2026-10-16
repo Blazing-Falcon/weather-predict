@@ -15,6 +15,7 @@ from nowcast.sources import gauges
 from nowcast.sources.bmkg import tick as bmkg_tick
 from nowcast.sources.himawari import tick as himawari_tick
 from nowcast.sources.imerg import backfill as imerg_backfill
+from nowcast.sources.imerg import fill as imerg_fill
 from nowcast.sources.imerg import gaps as imerg_gaps
 from nowcast.sources.imerg import tick as imerg_tick
 from nowcast.sources.mergir import backfill as mergir_backfill
@@ -35,6 +36,7 @@ app.add_typer(bmkg_app, name="bmkg")
 imerg_app = typer.Typer(no_args_is_help=True, help="Archive IMERG Early rainfall and report gaps.")
 imerg_app.command("backfill")(imerg_backfill)
 imerg_app.command("tick")(imerg_tick)
+imerg_app.command("fill")(imerg_fill)
 imerg_app.command("gaps")(imerg_gaps)
 app.add_typer(imerg_app, name="imerg")
 mergir_app = typer.Typer(

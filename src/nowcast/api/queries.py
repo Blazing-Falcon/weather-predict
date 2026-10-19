@@ -302,6 +302,10 @@ def meta(archive, now):
         "latest_observed_slot": rain,
         "latest_issue_slot": issue,
         "gauge_stations": gauges,
+        "frames_updated": max(
+            (file.stat().st_mtime for file in (archive.root / FRAMES).glob("date=*/*.parquet")),
+            default=None,
+        ),
     }
 
 

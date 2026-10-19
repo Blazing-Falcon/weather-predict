@@ -155,6 +155,10 @@ function initMeta(data) {
     $("alProvince").add(new Option(name, code));
   }
 
+  setTimeline();
+}
+
+function setTimeline() {
   modelIssue = meta.latest_issue_slot;
   timelineStart = (modelIssue ? Date.parse(modelIssue) : Math.floor(Date.parse(meta.as_of) / halfHour) * halfHour)
     - issueFrame * halfHour;
@@ -1265,3 +1269,22 @@ metaRequest = read("/api/meta", "Archive metadata").then(data => {
 });
 initialAlerts = loadAlerts();
 show();
+
+// New slots land every few minutes; reload the timeline and frames when the archive moves.
+const archiveStamp = data => [
+  data.latest_issue_slot, data.latest_observed_slot, data.latest_slots?.himawari, data.latest_slots?.bmkg,
+  data.frames_updated,
+].join("|");
+setInterval(async () => {
+  if (playing || !meta) return;
+  requests.clear();
+  const data = await read("/api/meta", "Archive metadata");
+  if (!data || archiveStamp(data) === archiveStamp(meta)) return;
+  const atIssue = frame === issueFrame;
+  const shown = tms(frame);
+  meta = data;
+  setTimeline();
+  frameData.clear();
+  setFrame(atIssue ? issueFrame : Math.max(0, Math.min(frameCount - 1, Math.round((shown - tms(0)) / halfHour))));
+  show();
+}, 60000);

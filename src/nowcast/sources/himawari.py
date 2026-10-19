@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from fcntl import LOCK_EX, LOCK_NB, flock
 from pathlib import Path
 from time import perf_counter
+from typing import Annotated
 
 import httpx
 import numpy as np
@@ -364,3 +365,63 @@ def tick() -> dict:
     except (OSError, ValueError, RuntimeError, httpx.HTTPError) as error:
         typer.echo(redact(str(error)), err=True)
         raise typer.Exit(1) from None
+
+
+def fill(
+    start: Annotated[str, typer.Option(help="UTC start (ISO), a model slot.")],
+    end: Annotated[str, typer.Option(help="UTC end (ISO).")],
+) -> None:
+    """Add past model slots (features and cloud tiles) without touching the live cursor."""
+    source = config.settings()["himawari"]
+    settings = config.settings()["mergir"]
+    state = paths.zone("state")
+    silver = paths.zone("silver") / "cloud_kabkota"
+    tiles = paths.zone("gold") / "tiles"
+    work = paths.zone("tmp") / "himawari_fill"
+    work.mkdir(parents=True, exist_ok=True)
+    grid = mergir_grid()
+    zonal = Zonal(pq.read_table(paths.zone("ref") / "mergir_membership.parquet"),
+                  grid.width * grid.height)
+    motion = CloudMotion(grid, settings["flow"])
+    logger = get_logger(__name__)
+    first, last = datetime.fromisoformat(start), datetime.fromisoformat(end)
+    scans = []
+    scan = first - SLOT_LENGTH
+    while scan <= last:
+        scans.append(scan)
+        scan += SLOT_LENGTH
+
+    def fetch(scan: datetime) -> list[Path] | None:
+        prefix = source["prefix"].format(
+            yyyy=f"{scan:%Y}", mm=f"{scan:%m}", dd=f"{scan:%d}", HHMM=f"{scan:%H%M}",
+        )
+        files = []
+        for segment in source["segments"]:
+            key = f"{prefix}HS_H09_{scan:%Y%m%d_%H%M}_{source['band']}_FLDK_R20_S{segment:02}10.DAT.bz2"
+            response = http.get(client, source["bucket_url"] + key)
+            if response.status_code != 200:
+                return None
+            path = work / Path(key).name
+            path.write_bytes(response.content)
+            files.append(path)
+        return files
+
+    previous = None
+    # S3 is slow per connection from here, so segments download 8 at a time ahead of decoding.
+    with http.client(timeout=300) as client, ThreadPoolExecutor(max_workers=8) as pool:
+        for scan, files in zip(scans, pool.map(fetch, scans)):
+            if files is None:
+                logger.warning("Himawari fill %s incomplete on S3, skipped", scan.isoformat())
+                previous = None
+                continue
+            tb = _decode(files, state / "himawari_index.npz", grid, source)
+            if scan >= first:
+                rows = cloud_rows(scan, tb, previous, zonal, motion, settings["cold_k"])
+                write_cloud(tile_path(tiles, "cloud", scan), tb)
+                with (state / "himawari.lock").open("a") as lock:
+                    flock(lock, LOCK_EX)
+                    merge_scan(silver / _partition(scan) / PART, rows, scan)
+                logger.info("Himawari fill %s rows=%d", scan.isoformat(), rows.num_rows)
+            previous = scan, tb
+            for path in files:
+                path.unlink()

@@ -13,6 +13,7 @@ from nowcast.retention import disk, retention
 from nowcast.silver.bmkg import parse as bmkg_parse
 from nowcast.sources import gauges
 from nowcast.sources.bmkg import tick as bmkg_tick
+from nowcast.sources.himawari import fill as himawari_fill
 from nowcast.sources.himawari import tick as himawari_tick
 from nowcast.sources.imerg import backfill as imerg_backfill
 from nowcast.sources.imerg import fill as imerg_fill
@@ -47,6 +48,7 @@ mergir_app.command("gaps")(mergir_gaps)
 app.add_typer(mergir_app, name="mergir")
 himawari_app = typer.Typer(no_args_is_help=True, help="Archive live Himawari cloud features.")
 himawari_app.command("tick")(himawari_tick)
+himawari_app.command("fill")(himawari_fill)
 app.add_typer(himawari_app, name="himawari")
 gauges_app = typer.Typer(no_args_is_help=True, help="Archive historical and live rain gauges.")
 gauges_app.command()(gauges.stations)
@@ -62,6 +64,7 @@ model_app.command("train")(train)
 app.add_typer(model_app, name="model")
 live_app = typer.Typer(no_args_is_help=True, help="Issue and verify live nowcast forecasts.")
 live_app.command()(score.score)
+live_app.command()(score.hindcast)
 live_app.command()(verify.verify)
 live_app.command()(scores_daily.daily)
 app.add_typer(live_app, name="live")

@@ -116,6 +116,7 @@ let hovered;
 let hoverPoint;
 const areaDetails = new Map();
 const frameData = new Map();
+const frameStamps = new Map();
 const requests = new Map();
 
 function read(url, label) {
@@ -173,14 +174,23 @@ function setTimeline() {
   updateWhen();
 }
 
+const archiveStamp = data => [
+  data.latest_issue_slot, data.latest_observed_slot, data.latest_slots?.himawari, data.latest_slots?.bmkg,
+  data.frames_updated,
+].join("|");
+
+// Frames are keyed by slot time, so older frames keep drawing until the newer archive arrives.
 async function loadFrames(...layers) {
+  const stamp = archiveStamp(meta);
   const window = new URLSearchParams({
     from: new Date(tms(0)).toISOString(), to: new Date(tms(frameCount - 1)).toISOString(),
   });
   await Promise.all(layers.map(async name => {
-    if (frameData.has(name)) return;
+    if (frameStamps.get(name) === stamp) return;
     const data = await read(`/api/frames?layer=${name}&${window}`, `${name} frames`);
-    if (data) frameData.set(name, new Map(data.slots.map((slot, index) => [Date.parse(slot), data.values[index]])));
+    if (!data) return;
+    frameData.set(name, new Map(data.slots.map((slot, index) => [Date.parse(slot), data.values[index]])));
+    frameStamps.set(name, stamp);
   }));
 }
 
@@ -335,28 +345,16 @@ function addRaster(name, before) {
     paint: { "raster-fade-duration": 0, "raster-resampling": name === "rain" ? "nearest" : "linear" } }, before);
 }
 
-async function drawRaster(name, visible) {
-  const target = raster[name];
-  const note = $(name + "TileNote");
-  if (!target) {
-    note.hidden = !visible;
-    return;
-  }
-  const revision = ++target.revision;
-  const stem = index => new Date(tms(index)).toISOString().replace(/[-:]/g, "").slice(0, 13) + "Z";
-  const stamp = stem(frame);
-  const times = meta.tile_times[name];
-  const scan = name === "rain" ? times.find(time => time === stamp)
-    : times.findLast(time => time <= stamp && time > stem(frame - 1));
-  const appearance = name === "rain" ? P().ob : P().cloud;
-  const key = [scan, appearance, name === "cloud" ? settings.cloud : ""].join(":");
-  if (visible && target.key === key) return;
-  target.key = null;
-  map.setLayoutProperty(name, "visibility", "none");
-  note.textContent = name === "rain" ? "No raw rain image archived for this time." : "No cloud image archived for this time.";
-  note.hidden = !visible || !!scan;
-  if (!visible || !scan) return;
+const stem = index => new Date(tms(index)).toISOString().replace(/[-:]/g, "").slice(0, 13) + "Z";
+const stemTime = scan => Date.parse(scan.replace(/(\d{4})(\d\d)(\d\d)T(\d\d)(\d\d)Z/, "$1-$2-$3T$4:$5Z"));
 
+// The latest image at or before the frame, up to 2 h old, so a short gap keeps the last picture.
+function tileFor(name, index) {
+  if (name === "rain" && (latestObs == null || tms(index) > Date.parse(latestObs))) return null;
+  return meta.tile_times[name].findLast(time => time <= stem(index) && time > stem(index - 4));
+}
+
+function tileBlob(name, scan) {
   const url = name === "rain" ? `/tiles/rain/${scan}.png` : `/tiles/cloud/${scan}.webp`;
   if (!tileImages.has(url)) {
     tileImages.set(url, fetch(url, { signal: AbortSignal.timeout(15000) }).then(response => {
@@ -367,7 +365,37 @@ async function drawRaster(name, visible) {
       return null;
     }));
   }
-  const blob = await tileImages.get(url);
+  return tileImages.get(url);
+}
+
+async function drawRaster(name, visible) {
+  const target = raster[name];
+  const note = $(name + "TileNote");
+  if (!target) {
+    note.hidden = !visible;
+    return;
+  }
+  const revision = ++target.revision;
+  const scan = visible ? tileFor(name, frame) : null;
+  const label = name === "rain" ? "raw rain image" : "cloud image";
+  note.textContent = scan ? `No ${label} archived for this time. Showing the one from ${clockWib(stemTime(scan))}.`
+    : `No ${label} archived for this time.`;
+  note.hidden = !visible || (scan ? scan > stem(frame - 1) : name === "rain" && tms(frame) > Date.parse(latestObs));
+  if (!scan) {
+    map.setLayoutProperty(name, "visibility", "none");
+    return;
+  }
+  const next = playing && tileFor(name, frame + 1);
+  if (next) tileBlob(name, next);
+  const appearance = name === "rain" ? P().ob : P().cloud;
+  const key = [scan, appearance, name === "cloud" ? settings.cloud : ""].join(":");
+  if (target.key === key) {
+    map.setLayoutProperty(name, "visibility", "visible");
+    return;
+  }
+
+  // The previous image stays on the map until the new one is drawn.
+  const blob = await tileBlob(name, scan);
   if (target.revision !== revision) return;
   const image = blob && await createImageBitmap(blob).catch(() => null);
   if (target.revision !== revision) {
@@ -375,7 +403,7 @@ async function drawRaster(name, visible) {
     return;
   }
   if (!image) {
-    note.textContent = name === "rain" ? "The raw rain image could not load." : "The cloud image could not load.";
+    note.textContent = `The ${label} could not load.`;
     note.hidden = false;
     return;
   }
@@ -1271,10 +1299,6 @@ initialAlerts = loadAlerts();
 show();
 
 // New slots land every few minutes; reload the timeline and frames when the archive moves.
-const archiveStamp = data => [
-  data.latest_issue_slot, data.latest_observed_slot, data.latest_slots?.himawari, data.latest_slots?.bmkg,
-  data.frames_updated,
-].join("|");
 setInterval(async () => {
   if (playing || !meta) return;
   requests.clear();
@@ -1284,7 +1308,7 @@ setInterval(async () => {
   const shown = tms(frame);
   meta = data;
   setTimeline();
-  frameData.clear();
   setFrame(atIssue ? issueFrame : Math.max(0, Math.min(frameCount - 1, Math.round((shown - tms(0)) / halfHour))));
-  show();
+  initialAlerts = loadAlerts();
+  renderView(view);
 }, 60000);

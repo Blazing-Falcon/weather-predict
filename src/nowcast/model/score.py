@@ -4,12 +4,14 @@ from datetime import UTC, datetime, timedelta
 from fcntl import LOCK_EX, LOCK_SH, flock
 from operator import itemgetter
 from pathlib import Path
+from typing import Annotated
 
 import lightgbm as lgb
 import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
+import typer
 
 from nowcast import config, parquet, paths
 from nowcast.features import build
@@ -101,6 +103,34 @@ def live_features(root, pending, lag):
     return frame
 
 
+def predict(root: Path, pending: list[datetime]) -> tuple[pa.Table, dict]:
+    version = max(path.parent.name for path in (root / "models").glob("*/card.json"))
+    card = model_card(root, version)
+    model = config.settings()["model"]
+    lag = int(config.env("IMERG_LAG_MINUTES", str(model["imerg_lag_minutes"])))
+    frame = live_features(root, pending, lag)
+    predictions = []
+    directory = root / "models" / version
+    for lead, details in card["leads"].items():
+        booster = lgb.Booster(model_file=str(directory / f"model_lead{lead}.txt"))
+        features = frame.rename(columns={f"clim_p{lead}": "clim_p"})[card["features"]]
+        probabilities = booster.predict(features, num_threads=model["lgbm"]["n_jobs"])
+        if details["calibration_used"]:
+            calibration = json.loads(
+                (directory / f"isotonic_lead{lead}.json").read_text(encoding="utf-8")
+            )
+            probabilities = np.interp(
+                probabilities, calibration["thresholds"], calibration["values"]
+            )
+        rows = frame[build.KEYS].copy()
+        rows["lead_h"] = int(lead)
+        rows["model_version"] = version
+        rows["prob_pct"] = np.rint(probabilities * 100).astype(np.uint8)
+        predictions.append(pa.Table.from_pandas(rows, preserve_index=False))
+
+    return pa.concat_tables(predictions), card
+
+
 def score_pending(root: Path, now: datetime) -> int:
     state = root / "state"
     cursor = state / "score_live.json"
@@ -136,31 +166,7 @@ def score_pending(root: Path, now: datetime) -> int:
         logger.info("No pending Himawari issue slots")
         return 0
 
-    version = max(path.parent.name for path in (root / "models").glob("*/card.json"))
-    card = model_card(root, version)
-    model = config.settings()["model"]
-    lag = int(config.env("IMERG_LAG_MINUTES", str(model["imerg_lag_minutes"])))
-    frame = live_features(root, pending, lag)
-    predictions = []
-    directory = root / "models" / version
-    for lead, details in card["leads"].items():
-        booster = lgb.Booster(model_file=str(directory / f"model_lead{lead}.txt"))
-        features = frame.rename(columns={f"clim_p{lead}": "clim_p"})[card["features"]]
-        probabilities = booster.predict(features, num_threads=model["lgbm"]["n_jobs"])
-        if details["calibration_used"]:
-            calibration = json.loads(
-                (directory / f"isotonic_lead{lead}.json").read_text(encoding="utf-8")
-            )
-            probabilities = np.interp(
-                probabilities, calibration["thresholds"], calibration["values"]
-            )
-        rows = frame[build.KEYS].copy()
-        rows["lead_h"] = int(lead)
-        rows["model_version"] = version
-        rows["prob_pct"] = np.rint(probabilities * 100).astype(np.uint8)
-        predictions.append(pa.Table.from_pandas(rows, preserve_index=False))
-
-    table = pa.concat_tables(predictions)
+    table, card = predict(root, pending)
     count = 0
     window_slots = 2 * max(map(int, card["leads"]))
     # IMERG tick and backfill take this directory lock before publishing rain.
@@ -230,3 +236,43 @@ def score() -> None:
     with (state / "score.lock").open("a") as lock:
         flock(lock, LOCK_EX)
         score_pending(root, datetime.now(UTC))
+
+
+def hindcast(
+    start: Annotated[str, typer.Option(help="UTC start (ISO).")],
+    end: Annotated[str, typer.Option(help="UTC end (ISO).")],
+) -> None:
+    """Score past Himawari slots into gold/hindcast, kept apart from live predictions."""
+    root = paths.data_root()
+    first, last = datetime.fromisoformat(start), datetime.fromisoformat(end)
+    slots = {
+        row["slot"]
+        for row in read_slots(
+            root / "silver" / "cloud_kabkota", first - timedelta(hours=1), last + HALF_HOUR,
+            ["slot"], build.CLOUD_PARTS[2], [("source", "=", 2)],
+        )
+    }
+    pending = sorted(
+        t for t in slots
+        if first <= t <= last and t.minute in (0, 30) and t - timedelta(hours=1) in slots
+    )
+    if not pending:
+        get_logger(__name__).info("No Himawari slots to hindcast")
+        return
+    table, _ = predict(root, pending)
+    issued_at = datetime.now(UTC)
+    count = 0
+    for t in pending:
+        part = partition(root / "gold" / "hindcast", t)
+        existing = read_rows(part)
+        keys = {KEY(row) for row in existing}
+        new = [
+            row | {"issued_at": issued_at}
+            for row in table.filter(pc.equal(table["t"], pa.scalar(t))).to_pylist()
+            if KEY(row) not in keys
+        ]
+        if new:
+            part.parent.mkdir(parents=True, exist_ok=True)
+            parquet.write_table(pa.Table.from_pylist(existing + new, schema=SCHEMA), part)
+            count += len(new)
+    get_logger(__name__).info("Hindcast slots=%d rows=%d", len(pending), count)

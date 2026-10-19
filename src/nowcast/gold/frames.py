@@ -25,17 +25,22 @@ SCHEMA = pa.schema(
 
 
 def latest_predictions(root: Path, first: datetime, stop: datetime) -> list[dict]:
-    rows = []
+    """Newest model version per slot; hindcasts only fill slots with no live prediction."""
+    tables = {}
+    for table in ("predictions", "hindcast"):
+        rows = []
+        for month, _ in month_ranges(first, stop):
+            rows += read_rows(
+                partition(root / "gold" / table, month),
+                columns=["t", "area_id", "lead_h", "model_version", "prob_pct"],
+                filters=[("t", ">=", first), ("t", "<", stop)],
+            )
+        tables[table] = rows
+    live = {row["t"] for row in tables["predictions"]}
+    rows = tables["predictions"] + [row for row in tables["hindcast"] if row["t"] not in live]
     versions = {}
-    for month, _ in month_ranges(first, stop):
-        for row in read_rows(
-            partition(root / "gold" / "predictions", month),
-            columns=["t", "area_id", "lead_h", "model_version", "prob_pct"],
-            filters=[("t", ">=", first), ("t", "<", stop)],
-        ):
-            t, version = row["t"], row["model_version"]
-            versions[t] = max(version, versions.get(t, version))
-            rows.append(row)
+    for row in rows:
+        versions[row["t"]] = max(row["model_version"], versions.get(row["t"], ""))
     return [row for row in rows if row["model_version"] == versions[row["t"]]]
 
 

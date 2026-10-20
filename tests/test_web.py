@@ -5,8 +5,6 @@ from fastapi.testclient import TestClient
 
 from nowcast.api.app import app
 
-MAPLIBRE = "https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/4.7.1/maplibre-gl.js"
-
 
 class References(HTMLParser):
     def __init__(self):
@@ -29,6 +27,7 @@ def test_web_static_files_and_api_priority(tmp_path, monkeypatch):
             ("/app.js", "text/javascript"),
             ("/style.css", "text/css"),
             ("/maplibre.css", "text/css"),
+            ("/maplibre-gl.js", "text/javascript"),
             ("/api/frames?layer=obs", "application/json"),
             ("/geo/kabkota.geojson", "application/geo+json"),
         ):
@@ -46,7 +45,7 @@ def test_web_references_use_approved_urls():
             "/app.js",
             "/style.css",
             "/maplibre.css",
-            MAPLIBRE,
+            "/maplibre-gl.js",
         }
 
         script = client.get("/app.js").text

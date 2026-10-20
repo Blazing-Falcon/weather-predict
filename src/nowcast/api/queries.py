@@ -99,24 +99,23 @@ class Archive:
         return self.rows(AREAS, f"SELECT * FROM data {where} ORDER BY area_id", params)
 
     def frames(self, layer, first, last):
+        # One value list per slot, indexed by area_id, with nulls for areas without a value.
         rows = self.rows(
             FRAMES,
-            "SELECT slot, area_id, value FROM data WHERE layer = ? AND slot BETWEEN ? AND ? "
-            "ORDER BY slot, area_id",
-            (layer, first, last),
+            f"""SELECT strftime(s.slot AT TIME ZONE 'UTC', '%Y-%m-%dT%H:%M:%S+00:00') AS slot,
+                list(d.value ORDER BY a.area_id) AS "values"
+            FROM (SELECT DISTINCT slot FROM data WHERE layer = ? AND slot BETWEEN ? AND ?) s
+            CROSS JOIN range({AREA_COUNT}) a(area_id)
+            LEFT JOIN data d ON d.layer = ? AND d.slot = s.slot AND d.area_id = a.area_id
+            GROUP BY s.slot ORDER BY s.slot""",
+            (layer, first, last, layer),
             first=first,
             last=last,
         )
-        frames = {}
-        for row in rows:
-            slot = row["slot"]
-            if slot not in frames:
-                frames[slot] = [None] * AREA_COUNT
-            frames[slot][row["area_id"]] = row["value"]
         return {
             "layer": layer,
-            "slots": [slot.isoformat() for slot in frames],
-            "values": list(frames.values()),
+            "slots": [row["slot"] for row in rows],
+            "values": [row["values"] for row in rows],
         }
 
     def predictions(self, first, last, area_id=None):
@@ -139,25 +138,24 @@ class Archive:
     def bmkg(self, first, last, area_id=None):
         # Runs publish 3-hour steps up to three days ahead.
         start = first - timedelta(days=4)
-        where = "" if area_id is None else "AND area_id = ?"
-        params = (start, last) if area_id is None else (start, last, area_id)
-        if first == last:
-            where += (
-                " AND first_seen <= ?"
-                " QUALIFY analysis_time = max(analysis_time) OVER (PARTITION BY area_id)"
-            )
-            params = (*params, first)
-        rows = self.rows(
-            BMKG,
-            "SELECT area_id, analysis_time, first_seen, valid_time, weather "
-            f"FROM data WHERE analysis_time BETWEEN ? AND ? {where} ORDER BY analysis_time DESC",
-            params,
-            first=start,
-            last=last,
-        )
         settings = config.settings()["bmkg"]
         alignment = {"before": -3, "after": 0, "centred": -1.5}[settings["step_alignment"]]
         offset = timedelta(hours=alignment)
+        where = "" if area_id is None else "AND area_id = ?"
+        params = (start, last) if area_id is None else (start, last, area_id)
+        sql = (
+            "SELECT area_id, analysis_time, first_seen, valid_time, weather "
+            f"FROM data WHERE analysis_time BETWEEN ? AND ? {where}"
+        )
+        if first == last:
+            # The newest run per area, cut to the one step that can cover the slot.
+            sql = (
+                f"SELECT * FROM ({sql} AND first_seen <= ?"
+                " QUALIFY analysis_time = max(analysis_time) OVER (PARTITION BY area_id))"
+                " WHERE valid_time + ? <= ? AND valid_time + ? > ?"
+            )
+            params = (*params, first, offset, first, offset, first - timedelta(hours=3))
+        rows = self.rows(BMKG, sql + " ORDER BY analysis_time DESC", params, first=start, last=last)
         runs = defaultdict(dict)
         for row in rows:
             run = runs[row["area_id"]].setdefault(row["analysis_time"], (row["first_seen"], {}))

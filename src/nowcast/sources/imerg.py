@@ -328,7 +328,13 @@ def _backfill(start: datetime, end: datetime, force: bool, state_path: Path) -> 
                 assert slots <= set(expected)
                 if granules:
                     download_month(granules, bronze, grid, parallel, progress)
-                stats = write_month(granules, bronze, silver, grid, zonal)
+                # The live tick and scorer lock the state directory to write or read rain.
+                directory = os.open(state_path.parent, os.O_RDONLY)
+                try:
+                    flock(directory, LOCK_EX)
+                    stats = write_month(granules, bronze, silver, grid, zonal)
+                finally:
+                    os.close(directory)
                 progress.update(stats)
                 reports[label] = {
                     "slots": len(slots), "bronze_bytes": progress["bytes"],
@@ -380,13 +386,9 @@ def backfill(
             raise ValueError("--start must be on or before --end")
         state = paths.zone("state")
         state.mkdir(parents=True, exist_ok=True)
-        lock = os.open(state, os.O_RDONLY)
-        try:
-            # Lock the directory because saving state replaces the JSON file.
+        with (state / "imerg_backfill.lock").open("a") as lock:
             flock(lock, LOCK_EX)
             return _backfill(first, last, force, state / "imerg_backfill.json")
-        finally:
-            os.close(lock)
     except (OSError, ValueError, RuntimeError, httpx.HTTPError) as error:
         typer.echo(redact(str(error)), err=True)
         raise typer.Exit(1) from None

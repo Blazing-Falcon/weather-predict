@@ -273,7 +273,7 @@ def _parallel() -> int:
     parallel = int(config.env("NASA_PARALLEL", str(config.settings()["nasa"]["parallel"])))
     if parallel < 1:
         raise ValueError("NASA_PARALLEL must be positive")
-    return min(parallel, 8)
+    return min(parallel, 16)
 
 
 def _partition(month: datetime) -> Path:

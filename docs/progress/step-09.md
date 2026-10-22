@@ -4,7 +4,7 @@ Date: 2026-11-20. Status: built, **awaiting juan's sign-off**.
 
 ## What Was Built
 
-`web/` (served by the API at `/`): mockup v6 split into `index.html`, `app.js`, `style.css`, with every mock data source replaced by the API. Gruvbox dark by default with the light variant, MapLibre GL JS 4.7.1 from cdnjs with no basemap tiles, the time slider with play, zoom presets, status pill and area drawer, as in the mockup. Credits: BMKG, NASA GES DISC, NOAA, aviationweather.gov, geoBoundaries.
+`web/` (served by the API at `/`): mockup v6 split into `index.html`, `app.js`, `style.css`, with every mock data source replaced by the API. Gruvbox dark by default with the light variant, MapLibre GL JS 4.7.1 (served from `web/` since the render fixes, before that from cdnjs) with no basemap tiles, the time slider with play, zoom presets, status pill and area drawer, as in the mockup. Credits: BMKG, NASA GES DISC, NOAA, aviationweather.gov, geoBoundaries.
 
 ## Done When
 

@@ -64,3 +64,26 @@ Output goes to `data/tmp/render-check/<label>/`. The refresh test waits 64 s; `-
 - The missing tiles are a pipeline gap, not a web gap. `nowcast gold tiles` renders missing tiles from bronze and should fill both gaps. It was not run here because this task does not write to `data/`.
 - At 1440 x 900 the left card column is 14 px taller than its box (753 px of 739) because of the extra "No data" legend row and the longer credits, so it scrolls slightly. The mockup fits exactly.
 - The area drawer's details (`/api/areas/<id>`) are not refetched on the refresh. Values that come from frames update, but the cloud-top line gains new slots only when the area is opened again.
+
+## Speed
+
+Measured on 2026-11-20 at 1440 x 900 in headless Chromium, with a cold cache on each run. Once loaded, the map was already fast: `setFrame` takes 0.9 ms of JS, and 514 feature-state updates take 0.1 ms. The first load was slow, so three changes went in:
+
+| Change | Before | After |
+|---|---:|---:|
+| `/api/frames`: DuckDB builds one value list per slot instead of Python building one dict per row (48,830 rows). Output is identical for all 7 layers. | 167 to 226 ms per call | 11 to 15 ms |
+| `/api/alerts`: the BMKG lookup keeps only the step of the newest run that covers the issue slot, instead of every 3-hour step. Output is identical at thresholds 0 and 50, and `weather_at` matches for 16 slots around the issue. | 146 to 174 ms | 56 to 64 ms |
+| MapLibre GL JS 4.7.1 is served from `web/maplibre-gl.js` instead of cdnjs. The file is byte-identical to the cdnjs and unpkg copies (sha256 `be9633c4…8add1`). | 0.2 to 2.1 s before `app.js` can run | 64 ms to DOMContentLoaded |
+| Raster recolour uses a 256-entry RGBA lookup table instead of per-pixel arithmetic. All 24 test images (clouds and rain, both themes) are byte-identical. | 7.8 ms per cloud tile (31.4 ms at 4x CPU throttle) | 0.8 ms (2.8 ms) |
+
+The per-row Python work held the GIL, so the 7 parallel frames requests finished one after another and the boundaries file waited behind them. With HEAD and the new code on two API ports against the same data, the medians of 4 alternating cold loads are:
+
+| Page load milestone | Before | After |
+|---|---:|---:|
+| Last `/api/frames` response | 1442 ms | 301 ms |
+| `kabkota.geojson` response | 1456 ms | 325 ms |
+| Map ready with the first frame | 2259 ms | 1117 ms |
+
+After the change, `06_web_check.py` still shows 0 console errors and 0 failed requests on all 7 pages at both widths. `07_render_check.py after` still shows 0 blank renders. By then all 87 observed slots had a rain tile, because the tile gap had been filled in `data/`. `tests/test_web.py` now expects `/maplibre-gl.js` instead of the cdnjs URL.
+
+Not changed: about 0.8 s of the remaining load is MapLibre building the map, plus several long main-thread tasks. Headless swiftshader probably inflates these, so they need a trace on a real GPU before any change.

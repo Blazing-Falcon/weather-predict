@@ -1,5 +1,6 @@
 import math
-from datetime import UTC, datetime, timedelta
+import random
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from time import monotonic
@@ -141,12 +142,16 @@ def feature_rows(
     lag: int,
     every: int,
     cloud_source: int = 1,
+    excluded_days: set[date] | None = None,
 ) -> DataFrame:
     start, end = slot_number(first), slot_number(stop) - 1
     offset = start - slot_number(available_imerg_slot(first, lag))
     issues = spark.range(start, end + 1, every).select(
         F.col("id").alias("t"), (F.col("id") - offset).alias("imerg_slot")
     )
+    if excluded_days:
+        issue_day = F.to_date(F.timestamp_seconds(F.col("t") * SLOT_SECONDS))
+        issues = issues.where(~issue_day.isin(sorted(excluded_days)))
     grid = issues.crossJoin(F.broadcast(areas))
     rain_first = min(start, start - offset - 47)
     rain_last = max(end + 2 * max(LEADS) - 1, end - offset)
@@ -277,6 +282,11 @@ def build(
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
     model = config.settings()["model"]
+    sampling = model["sample_days"]
+    sample_start, sample_stop = date_range(*model["split"][sampling["split"]])
+    fraction = sampling["fraction"]
+    if not 0 <= fraction <= 1:
+        raise typer.BadParameter("Sample fraction must be between 0 and 1")
     lag = int(config.env("IMERG_LAG_MINUTES", str(model["imerg_lag_minutes"])))
     every, remainder = divmod(model["issue_every_minutes"], 30)
     if every <= 0 or remainder or lag < 0:
@@ -290,6 +300,7 @@ def build(
     logger = get_logger(__name__)
     started = monotonic()
     metrics = {}
+    kept_days = total_days = 0
     with spark_session(root) as spark, TemporaryDirectory(dir=output.parent) as temp:
         rain_dir = root / "silver" / "rain_kabkota"
         newest = None
@@ -304,9 +315,30 @@ def build(
         staged = Path(temp) / "features"
         available_stop = datetime.fromtimestamp(newest - (2 * max(LEADS) - 2) * SLOT_SECONDS, UTC)
         for month_first, month_stop in month_ranges(first, min(stop, available_stop)):
+            month = month_first.replace(day=1)
             advance = (slot_number(first) - slot_number(month_first)) % every
             month_first += timedelta(seconds=advance * SLOT_SECONDS)
             if month_first >= month_stop:
+                continue
+            next_month = (month + timedelta(days=32)).replace(day=1)
+            day = max(month, sample_start).date()
+            days = [
+                day + timedelta(days=i)
+                for i in range((min(next_month, sample_stop).date() - day).days)
+            ]
+            excluded_days = set()
+            if days and fraction < 1:
+                k = max(1, round(fraction * len(days)))
+                chosen = random.Random(f"{sampling['seed']}-{month:%Y-%m}").sample(days, k)
+                excluded_days = set(days).difference(chosen)
+            issue_days = {
+                datetime.fromtimestamp(slot * SLOT_SECONDS, UTC).date()
+                for slot in range(slot_number(month_first), slot_number(month_stop), every)
+            }
+            sampled_issue_days = issue_days.intersection(days)
+            total_days += len(sampled_issue_days)
+            kept_days += len(sampled_issue_days - excluded_days)
+            if issue_days <= excluded_days:
                 continue
             rows = feature_rows(
                 spark,
@@ -318,6 +350,7 @@ def build(
                 lag,
                 every,
                 cloud_source,
+                excluded_days,
             )
             stats = Observation()
             observed = rows.observe(
@@ -353,6 +386,7 @@ def build(
             if pool.getType().name() == "HEAP"
         )
     count = metrics.get("rows", 0)
+    logger.info("Sampled split %s kept %d of %d issue days", sampling["split"], kept_days, total_days)
     logger.info("Wrote %s, %d rows, %d columns", output, count, len(KEYS + FEATURES + TARGETS) + 1)
     logger.info(
         "Feature null share %s",

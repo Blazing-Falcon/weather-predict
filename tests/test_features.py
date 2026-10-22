@@ -1,6 +1,7 @@
 from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
 from math import sin, tau
+from shutil import copytree
 
 import pyarrow as pa
 import pyarrow.dataset as ds
@@ -226,3 +227,48 @@ def test_issue_time_features(spark, silver, monkeypatch):
         ],
     )
     assert issue_features() == expected_features
+
+
+def test_build_samples_training_days_by_month(spark, silver, tmp_path, monkeypatch, caplog):
+    copytree(silver[0] / "ref", tmp_path / "ref")
+    rain = tmp_path / "silver" / "rain_kabkota" / "year=2025" / "month=02" / "part.parquet"
+    write_rows(rain, RAIN_SCHEMA, [{"slot": datetime(2025, 2, 9, 23, 30, tzinfo=UTC)}])
+    climate = spark.createDataFrame(
+        [], "area_id smallint, month int, hour_local int, "
+        "clim_wet_pct tinyint, clim_p1 tinyint, clim_p2 tinyint, clim_p3 tinyint",
+    )
+    monkeypatch.setattr(build, "read_climatology", lambda spark, root: climate)
+    monkeypatch.setattr(build, "spark_session", lambda root: nullcontext(spark))
+    monkeypatch.setenv("DATA_ROOT", str(tmp_path))
+    model = config.settings()["model"]
+    monkeypatch.setitem(model, "split", {"train": ["2025-01-27", "2025-02-07"]})
+    monkeypatch.setitem(model, "issue_every_minutes", 24 * 60)
+    sampling = {"split": "train", "fraction": 0.5, "seed": 42}
+    monkeypatch.setitem(model, "sample_days", sampling)
+    start, end = "2025-01-26", "2025-02-08"
+    out = tmp_path / "features"
+
+    def output_days():
+        data = ds.dataset(out, format="parquet", partitioning="hive")
+        return set(data.to_table(columns=["date"])["date"].to_pylist())
+
+    monkeypatch.setattr(build.get_logger("nowcast"), "propagate", True)
+    caplog.set_level("INFO", logger="nowcast")
+    outside = {"2025-01-26", "2025-02-08"}
+    chosen = {"2025-01-27", "2025-01-29", "2025-02-01", "2025-02-02", "2025-02-03", "2025-02-07"}
+    build.build(start, end, out)
+    assert output_days() == outside | chosen
+    assert "Sampled split train kept 6 of 12 issue days" in caplog.text
+
+    build.build("2025-01-28", "2025-02-06", out)
+    assert output_days() == {day for day in chosen if "2025-01-28" <= day <= "2025-02-06"}
+
+    build.build("2025-01-28", "2025-01-28", out)
+    assert output_days() == set()
+
+    sampling["fraction"] = 1.0
+    build.build(start, end, out)
+    first, stop = build.date_range(start, end)
+    assert output_days() == {
+        (first + timedelta(days=i)).date().isoformat() for i in range((stop - first).days)
+    }

@@ -55,6 +55,10 @@ model:
     train: ["2025-01-01", "2025-01-21"]
     valid: ["2025-01-22", "2025-01-25"]
     test:  ["2025-01-26", "2025-01-31"]
+  sample_days:               # keep this share of days in each month of the named split
+    split: train
+    fraction: 1.0
+    seed: 42
   lgbm:
     n_estimators: 2000
     learning_rate: 0.03

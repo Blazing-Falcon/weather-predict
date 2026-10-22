@@ -418,19 +418,16 @@ async function drawRaster(name, visible) {
   const colors = P().ob.map(hex => [
     parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16),
   ]);
-  for (let i = 0; i < data.length; i += 4) {
-    const value = data[i];
-    const [red, green, blue] = name === "cloud" ? appearance : colors[rainClass(value / 10)];
-    data[i] = red;
-    data[i + 1] = green;
-    data[i + 2] = blue;
-    if (name === "cloud") {
-      const a = Math.min(1, Math.max(0, (value / 255 - 0.28) / 0.55));
-      data[i + 3] = Math.round(255 * settings.cloud * a * a * (3 - 2 * a));
-    } else {
-      data[i + 3] = value ? 235 : 0;
-    }
+  // One RGBA entry per grey level. Both arrays are read as 32-bit words, so byte order matches.
+  const lut = new Uint8ClampedArray(256 * 4);
+  for (let value = 0; value < 256; value++) {
+    const a = Math.min(1, Math.max(0, (value / 255 - 0.28) / 0.55));
+    lut.set(name === "cloud" ? [...appearance, Math.round(255 * settings.cloud * a * a * (3 - 2 * a))]
+      : [...colors[rainClass(value / 10)], value ? 235 : 0], value * 4);
   }
+  const entries = new Uint32Array(lut.buffer);
+  const words = new Uint32Array(data.buffer);
+  for (let i = 0; i < words.length; i++) words[i] = entries[data[i * 4]];
   ctx.putImageData(pixels, 0, 0);
   target.key = key;
   map.setLayoutProperty(name, "visibility", "visible");

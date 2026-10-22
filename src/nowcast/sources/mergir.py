@@ -296,70 +296,94 @@ def _backfill(start: datetime, end: datetime, force: bool, state_path: Path) -> 
     parallel = _parallel()
     zonal = motion = None
     reports = {}
+    months = []
     month = start
     while month <= end:
         following = (month + timedelta(days=32)).replace(day=1)
-        label = month.strftime("%Y-%m")
-        partition = _partition(month)
-        bronze = paths.zone("bronze") / "mergir" / partition
-        silver = paths.zone("silver") / "cloud_kabkota" / partition
-        if state.get(label, {}).get("done") and not force:
-            logger.info("MERGIR %s already done, skipping", label)
-        else:
-            started = perf_counter()
-            if zonal is None:
-                membership = pq.read_table(paths.zone("ref") / "mergir_membership.parquet")
-                zonal = Zonal(membership, grid.width * grid.height)
-                cv2.setNumThreads(1)
-                motion = CloudMotion(grid, source["flow"])
-                logger.info("MERGIR pixel size %.3f km, smoothing sigma %.2f px",
-                            motion.pixel_km, motion.sigma)
-            if label in state:
-                del state[label]
-                _save_state(state_path, state)
-            entries = cmr.granules(source["collection"], month, following - timedelta(seconds=1))
-            granules = select_granules(entries, month, following)
-            logger.info("MERGIR %s listed %d hourly files, NASA parallelism=%d",
-                        label, len(granules), parallel)
-            download_month(granules, bronze, grid, parallel)
-            previous = _previous_frame(month, carry, bronze, grid) if granules else None
-            processing = perf_counter()
-            logger.info("MERGIR %s download phase %.2fs, processing %d frames",
-                        label, processing - started, 2 * len(granules))
-            stats, last = write_month(granules, bronze, silver, grid, zonal, motion, previous)
-            if last is not None:
-                slot, tb = last
-                temp = carry.with_suffix(".tmp")
-                with temp.open("wb") as file:
-                    np.savez(file, tb=tb, slot=slot.isoformat())
-                temp.replace(carry)
-            available = {slot for g in granules for slot in (g.slot, g.slot + SLOT_LENGTH)}
-            expected = _slot_range(month, following)
-            finished = perf_counter()
-            state[label] = {
-                "done": True,
-                **stats,
-                "expected": len(expected),
-                "missing_frames": [slot.isoformat() for slot in expected if slot not in available],
-                "download_seconds": processing - started,
-                "processing_seconds": finished - processing,
-                "elapsed_seconds": finished - started,
-            }
-            _save_state(state_path, state)
-            manifest = pq.ParquetFile(silver / "_manifest-mergir.parquet").read(columns=["bytes"])
-            reports[label] = {
-                "slots": stats["frames"], "bronze_bytes": sum(manifest["bytes"].to_pylist()),
-                "rows": stats["frames"] * len(zonal.area_ids), "silver_bytes": stats["silver_bytes"],
-            }
-            logger.info(
-                "MERGIR %s frames=%d/%d cold_speed_kmh_median=%s "
-                "download=%.2fs processing=%.2fs elapsed=%.2fs",
-                label, stats["frames"], len(expected), stats["cold_speed_kmh_median"],
-                processing - started, finished - processing, finished - started,
-            )
-        for crop in bronze.glob("*.nc4*"):
-            crop.unlink()
+        months.append((month, following))
         month = following
+    pending = (
+        (month, following)
+        for month, following in months
+        if force or not state.get(f"{month:%Y-%m}", {}).get("done")
+    )
+
+    def fetch_month(month, following):
+        label = f"{month:%Y-%m}"
+        bronze = paths.zone("bronze") / "mergir" / _partition(month)
+        entries = cmr.granules(source["collection"], month, following - timedelta(seconds=1))
+        granules = select_granules(entries, month, following)
+        logger.info("MERGIR %s listed %d hourly files, NASA parallelism=%d",
+                    label, len(granules), parallel)
+        download_month(granules, bronze, grid, parallel)
+        return granules
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        download_future = None
+        for month, following in months:
+            label = f"{month:%Y-%m}"
+            partition = _partition(month)
+            bronze = paths.zone("bronze") / "mergir" / partition
+            silver = paths.zone("silver") / "cloud_kabkota" / partition
+            if state.get(label, {}).get("done") and not force:
+                logger.info("MERGIR %s already done, skipping", label)
+            else:
+                started = perf_counter()
+                if zonal is None:
+                    membership = pq.read_table(paths.zone("ref") / "mergir_membership.parquet")
+                    zonal = Zonal(membership, grid.width * grid.height)
+                    cv2.setNumThreads(1)
+                    motion = CloudMotion(grid, source["flow"])
+                    logger.info("MERGIR pixel size %.3f km, smoothing sigma %.2f px",
+                                motion.pixel_km, motion.sigma)
+                if label in state:
+                    del state[label]
+                    _save_state(state_path, state)
+                waiting = perf_counter()
+                if download_future is None:
+                    download_future = pool.submit(fetch_month, *next(pending))
+                granules = download_future.result()
+                download_seconds = perf_counter() - waiting
+                previous = _previous_frame(month, carry, bronze, grid) if granules else None
+                # The carry fallback can download a crop, so resolve it before prefetching.
+                next_month = next(pending, None)
+                download_future = pool.submit(fetch_month, *next_month) if next_month else None
+                processing = perf_counter()
+                logger.info("MERGIR %s download wait %.2fs, processing %d frames",
+                            label, download_seconds, 2 * len(granules))
+                stats, last = write_month(granules, bronze, silver, grid, zonal, motion, previous)
+                if last is not None:
+                    slot, tb = last
+                    temp = carry.with_suffix(".tmp")
+                    with temp.open("wb") as file:
+                        np.savez(file, tb=tb, slot=slot.isoformat())
+                    temp.replace(carry)
+                available = {slot for g in granules for slot in (g.slot, g.slot + SLOT_LENGTH)}
+                expected = _slot_range(month, following)
+                finished = perf_counter()
+                state[label] = {
+                    "done": True,
+                    **stats,
+                    "expected": len(expected),
+                    "missing_frames": [slot.isoformat() for slot in expected if slot not in available],
+                    "download_seconds": download_seconds,
+                    "processing_seconds": finished - processing,
+                    "elapsed_seconds": finished - started,
+                }
+                _save_state(state_path, state)
+                manifest = pq.ParquetFile(silver / "_manifest-mergir.parquet").read(columns=["bytes"])
+                reports[label] = {
+                    "slots": stats["frames"], "bronze_bytes": sum(manifest["bytes"].to_pylist()),
+                    "rows": stats["frames"] * len(zonal.area_ids), "silver_bytes": stats["silver_bytes"],
+                }
+                logger.info(
+                    "MERGIR %s frames=%d/%d cold_speed_kmh_median=%s "
+                    "download=%.2fs processing=%.2fs elapsed=%.2fs",
+                    label, stats["frames"], len(expected), stats["cold_speed_kmh_median"],
+                    download_seconds, finished - processing, finished - started,
+                )
+            for crop in bronze.glob("*.nc4*"):
+                crop.unlink()
     return reports
 
 

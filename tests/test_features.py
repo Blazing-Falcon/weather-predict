@@ -123,6 +123,7 @@ def test_issue_time_features(spark, silver, monkeypatch):
     monkeypatch.setenv("DATA_ROOT", str(root))
     monkeypatch.setenv("IMERG_LAG_MINUTES", str(LAG))
     monkeypatch.setitem(config.settings()["model"], "climatology_period", ["2025-01-31"] * 2)
+    monkeypatch.setitem(config.settings()["model"], "issue_every_minutes", 30)
     monkeypatch.setattr(climatology, "spark_session", lambda _: nullcontext(spark))
     monkeypatch.setattr(build, "spark_session", lambda _: nullcontext(spark))
 

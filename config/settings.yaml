@@ -49,15 +49,16 @@ target:
 
 model:
   imerg_lag_minutes: 360     # issue time minus the START of the newest IMERG slot usable at that time
-  issue_every_minutes: 30
-  climatology_period: ["2025-01-01", "2025-01-21"]   # training period only; full run: 2016-01-01..2023-12-31
-  split:                     # dev sample month; full run is a config change
-    train: ["2025-01-01", "2025-01-21"]
-    valid: ["2025-01-22", "2025-01-25"]
-    test:  ["2025-01-26", "2025-01-31"]
+  issue_every_minutes: 60
+  climatology_period: ["2016-01-01", "2023-12-31"]   # training period only
+  split:                     # full run; the 2025-01 sample used days 1-21 / 22-25 / 26-31
+    train: ["2016-01-01", "2023-12-31"]
+    valid: ["2024-01-01", "2024-12-31"]
+    test:  ["2025-01-01", "2025-12-31"]
+    test_2026: ["2026-03-01", "2026-10-31"]   # after the IMERG Early V07C calibration change
   sample_days:               # keep this share of days in each month of the named split
     split: train
-    fraction: 1.0
+    fraction: 0.25
     seed: 42
   lgbm:
     n_estimators: 2000

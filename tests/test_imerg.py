@@ -263,16 +263,19 @@ def test_tick_month_boundary(live):
     runner = CliRunner()
     result = runner.invoke(app, ["imerg", "tick"])
     assert result.exit_code == 0, result.output
-    assert searches == [(previous + timedelta(seconds=1), now)]
-    for month, slot, title in zip(
-        (1, 2), (END - imerg.SLOT_LENGTH, END), titles[1:], strict=True
+    # The slot at the cursor is missing from silver, so the lookback fetches it again.
+    assert searches == [(now - imerg.LIVE_LOOKBACK, now)]
+    for month, slots, month_titles in zip(
+        (1, 2), ([previous, END - imerg.SLOT_LENGTH], [END]), (titles[:2], titles[2:]), strict=True
     ):
         partition = f"year=2025/month={month:02d}"
         silver = root / "silver/rain_kabkota" / partition
-        assert pq.ParquetFile(silver / "part.parquet").read()["slot"].to_pylist() == [slot] * 2
-        assert pq.ParquetFile(silver / "_manifest.parquet").read()["title"].to_pylist() == [title]
-        assert (root / "bronze/imerg" / partition / f"{title}.nc4").exists()
-    assert json.loads(cursor.read_text()) == {"last_slot": END.isoformat(), "processed": 5}
+        assert pq.ParquetFile(silver / "part.parquet").read()["slot"].to_pylist() == slots * 2
+        manifest = pq.ParquetFile(silver / "_manifest.parquet").read()
+        assert manifest["title"].to_pylist() == month_titles
+        for title in month_titles:
+            assert (root / "bronze/imerg" / partition / f"{title}.nc4").exists()
+    assert json.loads(cursor.read_text()) == {"last_slot": END.isoformat(), "processed": 6}
     latency = root / "state/imerg_latency.jsonl"
     lines = [json.loads(line) for line in latency.read_text().splitlines()]
     assert lines[-1] == {
@@ -281,11 +284,11 @@ def test_tick_month_boundary(live):
     }
     health = root / "state/health/imerg.json"
     assert json.loads(health.read_text()) == {
-        "last_tick": now.isoformat(), "last_slot": END.isoformat(), "new_slots": 2,
-        "latency_min_last": 210, "latency_min_p90_24h": 237,
+        "last_tick": now.isoformat(), "last_slot": END.isoformat(), "new_slots": 3,
+        "latency_min_last": 210, "latency_min_p90_24h": 264,
     }
     assert runner.invoke(app, ["imerg", "tick"]).exit_code == 0
-    assert len(latency.read_text().splitlines()) == 2
+    assert len(latency.read_text().splitlines()) == 3
     assert json.loads(health.read_text())["new_slots"] == 0
 
 

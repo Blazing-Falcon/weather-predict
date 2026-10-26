@@ -31,6 +31,7 @@ from nowcast.sources import cmr
 from nowcast.zonal import Zonal
 
 SLOT_LENGTH = timedelta(minutes=30)
+LIVE_LOOKBACK = timedelta(hours=12)
 UTC_US = pa.timestamp("us", tz="UTC")
 VERSION = pa.dictionary(pa.int8(), pa.string())
 RAIN_SCHEMA = pa.schema(
@@ -415,14 +416,32 @@ def newest_granule(now: datetime) -> Granule | None:
     return granules[0] if granules else None
 
 
+def _archived_slots(start: datetime, end: datetime) -> set[datetime]:
+    slots = set()
+    month = start.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    while month <= end:
+        manifest = paths.zone("silver") / "rain_kabkota" / _partition(month) / "_manifest.parquet"
+        if manifest.exists():
+            slots.update(pq.read_table(manifest, columns=["slot"])["slot"].to_pylist())
+        month = (month + timedelta(days=32)).replace(day=1)
+    return slots
+
+
 def _tick(state: Path, now: datetime) -> dict:
     cursor_path = state / "imerg_live.json"
     cursor = _live_cursor(state)
     last_slot = cursor["last_slot"]
-    start = _live_start(cursor, now)
+    after = _live_start(cursor, now)
+    # CMR can index a granule after a newer one, so slots behind the cursor are retried.
+    start = min(after, now - LIVE_LOOKBACK)
     entries = cmr.granules(config.settings()["imerg"]["collection"], start, now)
     seen_at = datetime.now(UTC)
     granules = select_granules(entries, start, now + timedelta(microseconds=1))
+    if start < after:
+        archived = _archived_slots(start, after)
+        granules = [
+            granule for granule in granules if granule.slot >= after or granule.slot not in archived
+        ]
 
     reports = {}
     if granules:
@@ -447,7 +466,10 @@ def _tick(state: Path, now: datetime) -> dict:
                 "rows": stats["rows"], "silver_bytes": stats["silver_bytes"],
                 "latency_min": (seen_at - (last + SLOT_LENGTH)).total_seconds() / 60,
             }
-        last_slot = granules[-1].slot.isoformat()
+        newest = granules[-1].slot
+        if last_slot:
+            newest = max(newest, datetime.fromisoformat(last_slot))
+        last_slot = newest.isoformat()
 
     latency_path = state / "imerg_latency.jsonl"
     recent = []

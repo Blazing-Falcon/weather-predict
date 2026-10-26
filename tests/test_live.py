@@ -205,6 +205,15 @@ def test_verify_waits_and_keeps_the_first_result(root):
     assert len({score.KEY(row) for row in (original, second)}) == 2
 
 
+def test_verify_fills_missing_climatology(root):
+    write(score.partition(root / "gold" / "predictions", T), [prediction()], score.SCHEMA)
+    part = score.partition(root / "gold" / "verification", T)
+    row = prediction() | {"verified_at": ISSUED, "observed": True, "motion_pct": 0}
+    write(part, [row | {"clim_pct": None}], verify.SCHEMA)
+    assert verify.verify_pending(root) == 0
+    assert [row["clim_pct"] for row in score.read_rows(part)] == [25]
+
+
 @pytest.mark.parametrize(
     ("alignment", "wet"), [("before", True), ("after", False), ("centred", True)]
 )

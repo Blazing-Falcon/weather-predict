@@ -70,11 +70,24 @@ def verify_pending(root: Path) -> int:
             {area: sorted(by_time.items(), reverse=True) for area, by_time in runs.items()},
         )
 
+    def clim_pct(row):
+        areas, climate, _ = reference_data()
+        local = row["t"] + timedelta(hours=areas[row["area_id"]])
+        return climate.get((row["area_id"], local.month, local.hour), {}).get(f"p{row['lead_h']}")
+
     card_for = cache(model_card)
     count = 0
     for part in sorted((gold / "predictions").glob("year=*/month=*/part.parquet")):
         output = gold / "verification" / part.relative_to(gold / "predictions")
         previous = read_rows(output)
+        # Climatology depends only on area and local time, so rows verified before it existed
+        # can take it later.
+        refilled = [row for row in previous if row["clim_pct"] is None and clim_pct(row) is not None]
+        for row in refilled:
+            row["clim_pct"] = clim_pct(row)
+        if refilled:
+            parquet.write_table(pa.Table.from_pylist(previous, schema=SCHEMA), output)
+            get_logger(__name__).info("Filled climatology for %d verified rows", len(refilled))
         done = {KEY(row) for row in previous}
         pending = [row for row in read_rows(part) if KEY(row) not in done]
         if not pending:
@@ -102,7 +115,7 @@ def verify_pending(root: Path) -> int:
         if not ready:
             continue
 
-        areas, climate, runs = reference_data()
+        _, _, runs = reference_data()
         motion = {
             (row["slot"], row["area_id"]): max(
                 (
@@ -128,7 +141,6 @@ def verify_pending(root: Path) -> int:
             card = card_for(root, version)
             threshold = card["threshold_mm_h"] * 10
             motion_cutoff = card["leads"][str(lead)]["csi_thresholds"]["motion_adv_max_pct"]
-            local = t + timedelta(hours=areas[area])
             persist = rain.get((row["imerg_slot"], area))
             bmkg_rain, analysis = bmkg_result(
                 runs.get(area, []),
@@ -143,7 +155,7 @@ def verify_pending(root: Path) -> int:
                     **row,
                     "verified_at": verified_at,
                     "observed": peak >= threshold,
-                    "clim_pct": climate.get((area, local.month, local.hour), {}).get(f"p{lead}"),
+                    "clim_pct": clim_pct(row),
                     "persist_pct": 100 * (persist >= threshold) if persist is not None else None,
                     "motion_pct": 100 * (motion.get((t, area), -1) >= motion_cutoff),
                     "bmkg_rain": bmkg_rain,

@@ -266,7 +266,7 @@ def meta(archive, now):
         "model": issue,
     }
     areas = archive.areas()
-    model_cards = cards(root)
+    live = config.settings()["model"]["live_version"]
     reporting = {
         row["station_id"]
         for row in archive.rows(
@@ -289,7 +289,7 @@ def meta(archive, now):
             source: round((now - slot).total_seconds() / 60, 1) if slot is not None else None
             for source, slot in slots.items()
         },
-        "model_version": model_cards[0]["version"] if model_cards else None,
+        "model_version": live if (root / "models" / live / "card.json").is_file() else None,
         "tile_bounds": read_json(root / "gold" / "tiles" / "bounds.json"),
         "tile_times": {
             "rain": tile_times(root, "rain", ".png", now - timedelta(days=7)),
@@ -413,6 +413,7 @@ def alerts(archive, threshold, level, island, province):
 
 def model(archive, now):
     model_cards = cards(archive.root)
+    live = config.settings()["model"]["live_version"]
     history = [
         {
             "version": card["version"],
@@ -459,7 +460,7 @@ def model(archive, now):
         else []
     )
     return {
-        "card": model_cards[0] if model_cards else None,
+        "card": next((card for card in model_cards if card["version"] == live), None),
         "history": history,
         "live_csi": {
             "from": first,

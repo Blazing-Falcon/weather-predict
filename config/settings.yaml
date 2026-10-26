@@ -48,6 +48,7 @@ target:
   leads_h: [1, 2, 3]
 
 model:
+  live_version: 20261120T1329Z-a2f52f2   # the model the live scorer and the API use; edit to promote
   imerg_lag_minutes: 360     # issue time minus the START of the newest IMERG slot usable at that time
   issue_every_minutes: 60
   climatology_period: ["2016-01-01", "2023-12-31"]   # training period only

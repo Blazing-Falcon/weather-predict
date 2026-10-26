@@ -104,9 +104,9 @@ def live_features(root, pending, lag):
 
 
 def predict(root: Path, pending: list[datetime]) -> tuple[pa.Table, dict]:
-    version = max(path.parent.name for path in (root / "models").glob("*/card.json"))
-    card = model_card(root, version)
     model = config.settings()["model"]
+    version = model["live_version"]
+    card = model_card(root, version)
     lag = int(config.env("IMERG_LAG_MINUTES", str(model["imerg_lag_minutes"])))
     frame = live_features(root, pending, lag)
     predictions = []

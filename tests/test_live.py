@@ -52,6 +52,7 @@ def write_slots(root, name, rows, schema, filename="part.parquet"):
 def root(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_ROOT", str(tmp_path))
     monkeypatch.setenv("IMERG_LAG_MINUTES", str(LAG))
+    monkeypatch.setitem(config.settings()["model"], "live_version", VERSION)
     (tmp_path / "state").mkdir()
     directory = tmp_path / "models" / VERSION
     directory.mkdir(parents=True)

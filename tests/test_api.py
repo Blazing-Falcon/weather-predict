@@ -9,12 +9,14 @@ import pyarrow.parquet as pq
 import pytest
 from fastapi.testclient import TestClient
 
+from nowcast import config
 from nowcast.api.app import app
 
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_ROOT", str(tmp_path))
+    monkeypatch.setitem(config.settings()["model"], "live_version", "v2")
     with TestClient(app) as test_client:
         yield test_client
 

@@ -70,13 +70,18 @@ def write_day(root: Path, day: date) -> int:
             p = np.array([row[column] for row in selected], dtype=float)
             if source != "bmkg":
                 p /= 100
-            thresholds = np.array(
-                [
-                    card_for(root, row["model_version"])["leads"][str(lead)]["csi_thresholds"][
-                        "probability"
-                    ].get(source, 0.5)
-                    for row in selected
-                ]
+            # Baselines that are 0 or 1 keep 0.5: a tuned cutoff can only make them "always rain".
+            thresholds = (
+                np.array(
+                    [
+                        card_for(root, row["model_version"])["leads"][str(lead)]["csi_thresholds"][
+                            "probability"
+                        ][source]
+                        for row in selected
+                    ]
+                )
+                if source in {"model", "clim"}
+                else 0.5
             )
             hits, false_alarms, misses = metrics.contingency(y, p, thresholds)
             clim = np.array([row["clim_pct"] for row in selected], dtype=float) / 100

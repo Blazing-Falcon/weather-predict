@@ -101,8 +101,10 @@ def fit_lead(dataset, splits, settings, lead, rain_threshold, output: Path | Non
         }
         del frame, prediction, climatology, eligible
         if name == "valid":
+            # Persistence and motion are 0 or 1, so a tuned cutoff can only make them "always rain".
             thresholds = {
-                source: metrics.best_csi_threshold(y, p) for source, p in probabilities.items()
+                source: metrics.best_csi_threshold(y, p) if source in {"model", "clim"} else 0.5
+                for source, p in probabilities.items()
             }
         clim_score = metrics.brier(y, probabilities["clim"])
         split_scores[name] = {

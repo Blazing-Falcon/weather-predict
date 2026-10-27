@@ -80,3 +80,25 @@ The three leads are separate models, and the +2 h and +3 h windows contain the +
 ## Open Question: Is the New Model Low Under Himawari?
 
 The live model's mean probability (14:00 to 18:30 UTC) is below climatology: 16.8% against 25.3% at +1 h, 21.8% against 30.9% at +2 h, 26.4% against 35.3% at +3 h. No truth window for it exists yet (first one about 20:10 UTC). A sensor check finds no cold-cloud bias: the wet share by `cold_pct` bin is close for Himawari (Nov 2026) and MERGIR (Nov 2025), for example 37.3% and 39.8% at 10-29%, 74.7% and 79.5% at 60% or more. `flow_kmh` is higher under Himawari (31.3 against 21.1 km/h, 14-18 UTC, Nov 2016-2025 MERGIR), which may be weather or sensor (hypothesis). Check again when the new model has a day of verification.
+
+## Fix Status (2026-11-20)
+
+juan picked findings 1, 2, 3, 4 and 7. UI findings 5, 6 and the hindcast label in 7 stay with the UI session.
+
+| Finding | Commit | Change |
+|---|---|---|
+| 2 | `ca535ac` | `model.live_version` in `settings.yaml` names the live model. Scorer and API read it. Promote a model by editing it. |
+| 1 | `efe679a` | Each IMERG tick also searches the last 12 h and fetches any slot missing from the silver manifest. |
+| 3 | `973d031` | Verification fills `clim_pct` for rows that have none, on the next verify run. |
+| 4 | `cb39db5` | Persistence and motion (0 or 1) are scored at 0.5 in daily scores and in new model cards. |
+| 7 | pending | Hindcast rerun with the live model waits until the 8000-tree retrain frees memory. |
+
+Checked on live data after the loops ran the new code:
+
+- Finding 1: the 19:31 tick fetched the 11:00 slot (514 rows in silver, tile drawn). The next verify run verified the 4,626 keys it had blocked.
+- Finding 3: the 19:33 verify run filled `clim_pct` on 20,046 rows. All 35,980 rows now have it, and every value equals the climatology for its area, local month, local hour and lead. A recomputation of `observed` gives 0 mismatches and 0 incomplete windows; keys are unique.
+- Finding 4: daily scores for 2026-11-20, computed into `data/tmp` (since deleted): persistence CSI is 0.103, 0.086, 0.076 for +1, +2, +3 h, against base rates 0.269, 0.374, 0.466 that the old cutoff would have given.
+- Finding 2: the scorer and the API read `live_version`; tests cover both (`tests/test_live.py`, `tests/test_api.py`). Full suite: 153 passed.
+- The same daily scores show that the retired sample model was below climatology for all of 2026-11-20 (model BSS -0.34, -0.25, -0.49). The live model has no verified window yet.
+
+To finish finding 7 after the retrain: `nowcast live hindcast --start 2026-11-18T02:00:00+00:00 --end 2026-11-19T23:00:00+00:00`. It adds rows for the live version, and frames already prefer the newest version per slot.

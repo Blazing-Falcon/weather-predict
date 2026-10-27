@@ -97,6 +97,7 @@ let obsFrame;
 let ticks = [];
 let frame = issueFrame;
 let selected = null;
+let drawerDetailFailed = false;
 let historyA = null;
 let historyB = null;
 let historySelection = 0;
@@ -118,18 +119,35 @@ const areaDetails = new Map();
 const frameData = new Map();
 const frameStamps = new Map();
 const requests = new Map();
+const failedLabels = new Set();
+let mapLayerError = false;
 
-function read(url, label) {
+function renderDataStatus() {
+  const labels = [...failedLabels];
+  $("dataStatusText").textContent = [
+    labels.length ? `${labels.join(", ")} could not load.` : "",
+    mapLayerError ? "Some map layers could not render." : "",
+  ].filter(Boolean).join(" ");
+  $("dataStatus").hidden = !labels.length && !mapLayerError;
+}
+
+function read(url, label, cache = "default") {
   if (!requests.has(url)) {
-    requests.set(url, fetch(url, { signal: AbortSignal.timeout(20000) }).then(response => {
+    const request = fetch(url, { cache, signal: AbortSignal.timeout(20000) }).then(response => {
       if (!response.ok) throw new Error(label);
       return response.json();
+    }).then(data => {
+      if (failedLabels.delete(label)) renderDataStatus();
+      return data;
     }).catch(() => {
-      requests.delete(url);
-      $("dataStatus").textContent = `${label} could not load. Reload to try again.`;
-      $("dataStatus").hidden = false;
+      if (requests.get(url) === request) requests.delete(url);
+      if (!failedLabels.has(label)) {
+        failedLabels.add(label);
+        renderDataStatus();
+      }
       return null;
-    }));
+    });
+    requests.set(url, request);
   }
   return requests.get(url);
 }
@@ -145,6 +163,7 @@ function initMeta(data) {
   areaById = new Map(areas.map(area => [area.area_id, area]));
   islands = [...new Set(areas.map(area => area.island).filter(Boolean))];
   const malang = areas.find(area => area.label === "Kota Malang");
+  malangId = malang?.area_id;
   historyA ??= malang?.area_id ?? areas[0]?.area_id ?? null;
   for (const area of areas.toSorted((a, b) => a.label.localeCompare(b.label))) {
     $("hA").add(new Option(area.label, area.area_id));
@@ -157,6 +176,7 @@ function initMeta(data) {
   }
 
   setTimeline();
+  $("play").disabled = false;
 }
 
 function setTimeline() {
@@ -526,8 +546,8 @@ async function initMap() {
   map.touchZoomRotate.disableRotation();
   await new Promise(resolve => map.once("load", resolve));
   map.on("error", () => {
-    $("dataStatus").textContent = "Some map layers could not render.";
-    $("dataStatus").hidden = false;
+    mapLayerError = true;
+    renderDataStatus();
   });
   const features = meta.gauge_stations.map(station => ({
     type: "Feature", properties: { icao: station.icao },
@@ -640,6 +660,7 @@ async function openDrawer(id, zoom) {
   const area = mapAreas.get(id);
   if (!area || !mapReady) return;
   selected = id;
+  drawerDetailFailed = false;
   $("drawer").hidden = false;
   $("national").hidden = true;
   map.setFilter("kab-sel", ["==", ["get", "i"], id]);
@@ -649,9 +670,14 @@ async function openDrawer(id, zoom) {
   }
   drawDrawer();
   if (!areaDetails.has(id)) {
-    const detail = await read(`/api/areas/${id}`, "Area details");
-    areaDetails.set(id, detail);
-    if (selected === id) drawDrawer();
+    const stamp = archiveStamp(meta);
+    const detail = await read(`/api/areas/${id}`, "Area details", "no-cache");
+    if (stamp !== archiveStamp(meta)) return;
+    if (detail) areaDetails.set(id, detail);
+    if (selected === id) {
+      drawerDetailFailed = !detail;
+      drawDrawer();
+    }
   }
 }
 
@@ -742,30 +768,31 @@ function drawDrawer() {
   const details = data ? [cold != null ? `Cold cloud ${percent(cold)}` : null,
     score ? `${data.scores.scope === "area" ? "Area" : "Province"} CSI ${decimal(score.csi)}` : "No area or province scores yet",
     clim ? `Local usual rain chance ${percent(clim.p3)}` : null,
-  ].filter(Boolean).join(" · ") : areaDetails.has(selected) ? "Area details unavailable." : "Loading area details…";
+  ].filter(Boolean).join(" · ") : drawerDetailFailed ? "Area details unavailable." : "Loading area details…";
   $("dDetail").textContent = details;
   $("dWatch").setAttribute("aria-pressed", watch.has(selected));
   $("dWatch").textContent = watch.has(selected) ? "★ Watching" : "☆ Watch";
 }
 
 function renderScoreboard(scores) {
-  const latest = scores.findLast(row => row.lead_h === 3)?.day;
+  const latest = scores?.findLast(row => row.lead_h === 3)?.day;
   $("national").querySelector(".phead .note").textContent = latest ? `${latest} UTC · +3 h` : "Latest verified day · +3 h";
   $("natBody").innerHTML = latest ? scores.filter(row => row.day === latest && row.lead_h === 3).map(row => {
     const [label, color] = scoreNames[row.source];
     return `<tr><td><span class="key" style="background:${color}"></span>${label}</td>
       <td class="num">${decimal(row.csi)}</td><td class="num">${pct(row.pod)}</td><td class="num">${pct(row.far)}</td></tr>`;
-  }).join("") : emptyRow(4, "No verified national scores yet.");
+  }).join("") : emptyRow(4, scores ? "No verified national scores yet." : "National scores unavailable.");
 }
 
 function renderMapStatus(data) {
-  const issueAge = meta.freshness_minutes.model;
+  const issueAge = meta?.freshness_minutes.model;
   const live = issueAge != null && issueAge >= 0 && issueAge <= 60;
-  $("sourceState").textContent = live ? "LIVE" : modelIssue ? "ARCHIVE" : "NO ISSUE";
+  $("sourceState").textContent = !meta ? "OFFLINE" : live ? "LIVE" : meta.latest_issue_slot ? "ARCHIVE" : "NO ISSUE";
   $("sourceStatus").classList.toggle("archive", !live);
-  $("mapIssue").textContent = modelIssue ? fmtTime(modelIssue) : "";
+  if (!meta) return;
+  $("mapIssue").textContent = meta.latest_issue_slot ? fmtTime(meta.latest_issue_slot) : "";
   $("mapCloud").textContent = clockWib(meta.latest_slots.himawari);
-  $("mapRain").textContent = clockWib(latestObs);
+  $("mapRain").textContent = clockWib(meta.latest_observed_slot);
   $("mapBmkg").textContent = clockWib(meta.latest_slots.bmkg);
   if (!data) return;
   const processed = data.processed_vs_stored;
@@ -778,7 +805,23 @@ function getShare(values, predicate) {
   return present?.length ? present.reduce((sum, value) => sum + predicate(value), 0) / present.length : null;
 }
 
+function renderFreshness() {
+  $("freshTime").textContent = meta ? clockWib(meta.as_of) : "";
+  $("fresh").innerHTML = meta ? ["himawari", "bmkg", "imerg", "metar", "model"].map(key => `
+    <span>${sources[key]}</span><span class="mono note">${clockWib(meta.latest_slots[key])}</span>
+    <span class="${key === "imerg" ? "lag" : "note"}">${minutes(meta.freshness_minutes[key])}</span>`).join("")
+    : '<span class="note">Data freshness unavailable.</span>';
+}
+
 function renderOverview(ranking) {
+  renderFreshness();
+  if (!meta) {
+    $("ovTime").textContent = "Archive metadata unavailable.";
+    chartNote($("ovShare"), "Rain share unavailable.");
+    chartNote($("ovIsland"), "Island forecasts unavailable.");
+    $("ovTop").innerHTML = emptyRow(5, "Forecast ranking unavailable.");
+    return;
+  }
   const obs = frameRow("obs", obsFrame);
   const coldTime = [...(frameData.get("cold")?.keys() ?? [])].findLast(time => time <= tms(issueFrame));
   const cold = frameData.get("cold")?.get(coldTime);
@@ -799,44 +842,54 @@ function renderOverview(ranking) {
     { values: indices.map(index => getShare(frameRow("cold", index), value => value >= 25)), color: "var(--fg)", width: 1.5 },
     { values: indices.map(index => getShare(frameRow("obs", index), value => value >= 5)), color: "var(--aqua)", width: 2.2 },
   ];
-  const hi = Math.max(0.3, Math.ceil(Math.max(...series.flatMap(line => line.values)) * 10) / 10);
-  lineChart($("ovShare"), 760, 230, series, {
-    n: frameCount, hi, yt: Array.from({ length: Math.round(hi * 10) + 1 }, (_, i) => i / 10), format: pct, xt: ticks,
-    marks: [[obsFrame, "IMERG"], [issueFrame, "issue"]].filter(([index]) => index >= 0),
-  });
-  $("freshTime").textContent = clockWib(meta.as_of);
-  $("fresh").innerHTML = ["himawari", "bmkg", "imerg", "metar", "model"].map(key => `
-    <span>${sources[key]}</span><span class="mono note">${clockWib(meta.latest_slots[key])}</span>
-    <span class="${key === "imerg" ? "lag" : "note"}">${minutes(meta.freshness_minutes[key])}</span>`).join("");
+  const stamp = archiveStamp(meta);
+  const shareFailed = ["prob1", "prob2", "prob3", "obs", "cold"].some(name => frameStamps.get(name) !== stamp);
+  const shareValues = series.flatMap(line => line.values);
+  if (shareFailed && shareValues.every(value => value == null)) {
+    chartNote($("ovShare"), "Rain share unavailable.");
+  } else {
+    const hi = Math.max(0.3, Math.ceil(Math.max(...shareValues) * 10) / 10);
+    lineChart($("ovShare"), 760, 230, series, {
+      n: frameCount, hi, yt: Array.from({ length: Math.round(hi * 10) + 1 }, (_, i) => i / 10), format: pct, xt: ticks,
+      marks: [[obsFrame, "IMERG"], [issueFrame, "issue"]].filter(([index]) => index >= 0),
+    });
+  }
   const rows = islands.map(island => ({
     label: island, values: [[getShare(areas.filter(area => area.island === island)
       .map(area => forecast?.[area.area_id]), value => value >= 60), "var(--blue)"]],
   }));
   if (rows.some(row => row.values[0][0] != null)) {
     barsH($("ovIsland"), 460, 230, rows, { max: Math.max(0.2, ...rows.map(row => row.values[0][0])), format: pct });
-  } else chartNote($("ovIsland"), "No island forecasts archived.");
+  } else chartNote($("ovIsland"), !ranking && frameStamps.get("prob3") !== stamp
+    ? "Island forecasts unavailable." : "No island forecasts archived.");
   const top = (ranking?.alerts ?? []).filter(row => row.prob_pct[3] != null)
     .sort((a, b) => b.prob_pct[3] - a.prob_pct[3]).slice(0, 10);
   $("ovTop").innerHTML = top.map(row => `
     <tr><td><button class="linkbtn" data-open="${row.area_id}">${escape(areaById.get(row.area_id)?.label ?? row.name)}</button></td>
     <td class="note">${escape(row.island)}</td><td class="mono"><span class="bar" style="width:${row.prob_pct[3] / 2}px"></span>${percent(row.prob_pct[3])}</td>
     <td class="num">${temp(row.tb_min)}</td><td><span class="chip">${bmkgText(row.bmkg)}</span></td></tr>`
-  ).join("") || emptyRow(5, "No ranked forecasts available.");
+  ).join("") || emptyRow(5, ranking ? "No ranked forecasts available." : "Forecast ranking unavailable.");
 }
 
 function renderAlerts() {
+  if (!alertData) {
+    $("alCount").textContent = "Alerts unavailable";
+    $("alTime").textContent = "";
+    $("alBody").innerHTML = emptyRow(11, "Alerts unavailable");
+    return;
+  }
   const q = $("alQ").value.trim().toLowerCase();
   const island = $("alIsland").value;
   const province = $("alProvince").value;
   const minimum = Number($("alLvl").value);
   const onlyWatch = $("alWatch").checked;
-  const rows = (alertData?.alerts ?? []).filter(row => {
+  const rows = alertData.alerts.filter(row => {
     const label = areaById.get(row.area_id)?.label ?? row.name ?? "";
     return row.rank >= minimum && (!island || row.island === island) && (!province || row.province_code === province)
       && (!q || label.toLowerCase().includes(q)) && (!onlyWatch || watch.has(row.area_id));
   });
   $("alCount").textContent = count(rows.length) + (rows.length === 1 ? " area" : " areas");
-  $("alTime").textContent = alertData?.issue_slot ? `Issued ${fmtTime(alertData.issue_slot)}` : "No alert issue available";
+  $("alTime").textContent = alertData.issue_slot ? `Issued ${fmtTime(alertData.issue_slot)}` : "No alert issue available";
   $("alBody").innerHTML = rows.map(row => {
     const label = escape(areaById.get(row.area_id)?.label ?? row.name);
     return `<tr><td><button class="star" data-star="${row.area_id}" aria-pressed="${watch.has(row.area_id)}" aria-label="Watch ${label}">★</button></td>
@@ -844,8 +897,8 @@ function renderAlerts() {
       ${leads.map(lead => `<td class="num">${percent(row.prob_pct[lead])}</td>`).join("")}
       <td class="num">${temp(row.tb_min)}</td><td class="num">${percent(row.cold_pct)}</td>
       <td><span class="chip">${bmkgText(row.bmkg)}</span></td><td><button class="linkbtn" data-open="${row.area_id}">map</button></td></tr>`;
-  }).join("") || emptyRow(11, !alertData ? "Alert data unavailable."
-    : !alertData.issue_slot ? "No forecast issue archived." : "No areas match. Lower the level or clear the search.");
+  }).join("") || emptyRow(11, !alertData.issue_slot ? "No forecast issue archived."
+    : "No areas match. Lower the level or clear the search.");
 }
 
 async function loadAlerts() {
@@ -860,6 +913,19 @@ async function loadAlerts() {
 
 // Model, history, pipeline and settings
 function renderModel(data) {
+  if (!data) {
+    $("mdSplit").textContent = "Model results unavailable.";
+    $("mdTiles").replaceChildren();
+    $("mdLive").textContent = "";
+    for (const [id, message] of [
+      ["mdCal", "Calibration unavailable."], ["mdHour", "Hourly CSI unavailable."],
+      ["mdIsland", "Island CSI unavailable."], ["mdFeat", "Feature importance unavailable."],
+    ]) chartNote($(id), message);
+    $("mdRuns").innerHTML = emptyRow(5, "Test scores unavailable.");
+    $("mdRunsNote").textContent = "";
+    $("mdVersions").innerHTML = emptyRow(5, "Model versions unavailable.");
+    return;
+  }
   const card = data?.card;
   const lead = card?.leads[3];
   const scores = lead?.metrics.test;
@@ -908,7 +974,8 @@ function renderModel(data) {
     lineChart($("mdHour"), 460, 300, series, { n: 24, hi: 1, yt: [0, 0.25, 0.5, 0.75, 1],
       format: decimal, xt: [[0, "00"], [6, "06"], [12, "12"], [18, "18"], [23, "23"]] });
   } else chartNote($("mdHour"), "No verified hourly CSI yet.");
-  const regionRows = islands.map(island => ({ label: island, values: ["model", "motion"].map(source =>
+  const modelIslands = meta ? islands : [...new Set(regional.map(row => row.island))];
+  const regionRows = modelIslands.map(island => ({ label: island, values: ["model", "motion"].map(source =>
     [regional.find(row => row.island === island && row.source === source)?.csi, scoreNames[source][1]]) }));
   if (regionRows.some(row => row.values.some(([value]) => value != null))) {
     barsH($("mdIsland"), 460, 260, regionRows, { max: 1, format: decimal });
@@ -1081,30 +1148,37 @@ function renderSettings() {
 
 async function renderView(current) {
   if (current === "settings") renderSettings();
-  const data = await metaRequest;
+  await metaRequest;
   if (view !== current) return;
-  if (!data) {
-    if (current === "map") $("loading").textContent = "Map data is unavailable.";
-    return;
-  }
-  if (current === "map") {
+  if (current === "alerts") {
+    await initialAlerts;
+    renderAlerts();
+  } else if (current === "model") {
+    renderModel(await read("/api/model", "Model results"));
+  } else if (!meta) {
+    if (current === "map") {
+      renderMapStatus();
+      renderScoreboard(null);
+      $("loading").textContent = "Map data is unavailable.";
+    } else if (current === "overview") renderOverview();
+  } else if (current === "map") {
     renderMapStatus();
     const [pipeline, scores, ranking] = await Promise.all([
       read("/api/pipeline", "Pipeline statistics"), read("/api/scores?scope=national&lead=3", "National scores"),
-      read(alertUrl(0), "Latest forecast"), loadFrames("prob1", "prob2", "prob3", "obs", "cold", "bmkg", "disagree"),
+      read(alertUrl(0), "Forecast ranking"), loadFrames("prob1", "prob2", "prob3", "obs", "cold", "bmkg", "disagree"),
       mapSetup ??= initMap(),
     ]);
     if (view !== current) return;
     useLatestProbabilities(ranking);
     renderMapStatus(pipeline);
-    if (scores) renderScoreboard(scores);
+    renderScoreboard(scores);
     if (mapReady) map.resize();
-    const id = pendingArea;
+    const zoom = pendingArea != null;
+    const id = pendingArea ?? selected ?? (!drawerClosed && innerWidth > 820 ? malangId : null);
     pendingArea = null;
     await Promise.all([
       applyFrame(),
-      id != null ? openDrawer(id, true)
-        : selected == null && !drawerClosed && innerWidth > 820 && malangId != null ? openDrawer(malangId, false) : null,
+      id != null && (zoom || !areaDetails.has(id)) ? openDrawer(id, zoom) : null,
     ]);
   } else if (current === "overview") {
     const [ranking] = await Promise.all([
@@ -1114,11 +1188,6 @@ async function renderView(current) {
       useLatestProbabilities(ranking);
       renderOverview(ranking);
     }
-  } else if (current === "alerts") {
-    await initialAlerts;
-    renderAlerts();
-  } else if (current === "model") {
-    renderModel(await read("/api/model", "Model results"));
   } else if (current === "history") {
     await renderHistory();
   } else if (current === "pipeline") {
@@ -1131,6 +1200,30 @@ let drawerClosed = false;
 let malangId;
 let metaRequest;
 let initialAlerts;
+
+async function refreshMeta() {
+  const data = await read("/api/meta", "Archive metadata", "no-cache");
+  if (!data) return false;
+  if (!meta) {
+    initMeta(data);
+    return true;
+  }
+  const changed = archiveStamp(data) !== archiveStamp(meta);
+  meta = data;
+  renderMapStatus();
+  if (view === "overview") renderFreshness();
+  if (!changed) return false;
+  const atIssue = frame === issueFrame;
+  const shown = tms(frame);
+  areaDetails.clear();
+  for (const url of requests.keys()) {
+    if (url.startsWith("/api/areas/")) requests.delete(url);
+  }
+  setTimeline();
+  setFrame(atIssue ? issueFrame : Math.max(0, Math.min(frameCount - 1, Math.round((shown - tms(0)) / halfHour))));
+  if (selected != null) openDrawer(selected, false);
+  return true;
+}
 
 async function show() {
   const requested = location.hash.slice(1);
@@ -1234,6 +1327,20 @@ $("play").addEventListener("click", () => {
     else setFrame(frame + 1);
   }, 260);
 });
+$("dataRetry").addEventListener("click", async () => {
+  $("dataRetry").disabled = true;
+  requests.clear();
+  mapLayerError = false;
+  renderDataStatus();
+  if (!meta || failedLabels.has("Archive metadata")) metaRequest = refreshMeta();
+  initialAlerts = loadAlerts();
+  if (view === "map" && !mapReady) {
+    await mapSetup;
+    if (!mapReady) mapSetup = undefined;
+  }
+  await show();
+  $("dataRetry").disabled = false;
+});
 $("dClose").addEventListener("click", () => {
   drawerClosed = true;
   selected = null;
@@ -1285,27 +1392,15 @@ prefersLight.addEventListener("change", () => {
 addEventListener("hashchange", show);
 
 applyTheme();
-metaRequest = read("/api/meta", "Archive metadata").then(data => {
-  if (data) {
-    initMeta(data);
-    malangId = areas.find(area => area.label === "Kota Malang")?.area_id;
-  }
-  return data;
-});
+metaRequest = refreshMeta();
 initialAlerts = loadAlerts();
 show();
 
 // New slots land every few minutes; reload the timeline and frames when the archive moves.
 setInterval(async () => {
-  if (playing || !meta) return;
+  if (playing || !meta || $("dataRetry").disabled) return;
   requests.clear();
-  const data = await read("/api/meta", "Archive metadata");
-  if (!data || archiveStamp(data) === archiveStamp(meta)) return;
-  const atIssue = frame === issueFrame;
-  const shown = tms(frame);
-  meta = data;
-  setTimeline();
-  setFrame(atIssue ? issueFrame : Math.max(0, Math.min(frameCount - 1, Math.round((shown - tms(0)) / halfHour))));
+  if (!await refreshMeta()) return;
   initialAlerts = loadAlerts();
   renderView(view);
 }, 60000);

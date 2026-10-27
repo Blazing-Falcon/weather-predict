@@ -24,7 +24,7 @@
 </header>
 
 <main>
-<p id="dataStatus" class="note" role="status" hidden></p>
+<div id="dataStatus" class="note" hidden><span id="dataStatusText" role="status"></span> <button type="button" class="btn" id="dataRetry">Retry</button></div>
 <!-- ================= MAP ================= -->
 <section class="view" id="view-map">
   <div class="stage">
@@ -84,7 +84,7 @@
     </div>
     <div class="ov ov-bottom">
       <div class="card slider">
-        <button type="button" class="play" id="play" aria-label="Play">▶</button>
+        <button type="button" class="play" id="play" aria-label="Play" disabled>▶</button>
         <div class="track">
           <div class="trackbar"><div class="deco" id="deco"></div><input type="range" id="frame" min="0" max="102" step="1" value="96" aria-label="Time"></div>
           <div class="ticks" id="ticks"></div>

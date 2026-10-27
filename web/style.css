@@ -188,6 +188,7 @@ body{margin:0}
 select{max-width:100%}
 summary{cursor:pointer;color:var(--muted)}
 #dataStatus{padding:5px 16px;background:var(--panel);border-bottom:1px solid var(--line)}
+.play:disabled{opacity:.45;cursor:not-allowed}
 #sourceStatus.archive{color:var(--muted);border-color:var(--line2)}
 #sourceStatus.archive i{background:var(--muted);animation:none}
 .loading{padding:12px;text-align:center}

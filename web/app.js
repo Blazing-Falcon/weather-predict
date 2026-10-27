@@ -64,8 +64,26 @@ const escape = value => String(value ?? "").replace(/[&<>"']/g, c => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
 })[c]);
 const emptyRow = (columns, message) => `<tr><td colspan="${columns}" class="note">${message}</td></tr>`;
-const bmkgText = record => record?.weather == null ? blank
-  : `${record.rain ? "Rain" : "No rain"} · code ${record.weather}`;
+const bmkgNames = {
+  0: ["Cerah", "Sunny"],
+  1: ["Cerah", "Sunny"],
+  2: ["Cerah Berawan", "Partly Cloudy"],
+  3: ["Berawan", "Mostly Cloudy"],
+  10: ["Udara Kabur", "Mist/Haze"],
+  17: ["Petir", "Thunder"],
+  45: ["Kabut/Asap", "Fog/Smoke"],
+  61: ["Hujan Ringan", "Light Rain"],
+  63: ["Hujan Sedang", "Moderate Rain"],
+  65: ["Hujan Lebat", "Heavy Rain"],
+  95: ["Hujan Petir", "Thunderstorm"],
+};
+function bmkgText(record, className = "") {
+  if (record?.weather == null) return `<span class="${className}">${blank}</span>`;
+  const code = `code ${escape(record.weather)}`;
+  const names = bmkgNames[record.weather];
+  const title = names ? `${names[1]} · ${code}` : code;
+  return `<span class="${className}" title="${title}">${names?.[0] ?? code}</span>`;
+}
 const areaLabel = area => area.kemendagri_name?.startsWith("Kota ")
   ? area.kemendagri_name : area.geo_name.startsWith("Kota ") ? area.geo_name
     : area.is_admin ? "Kab. " + area.geo_name : area.geo_name;
@@ -227,6 +245,12 @@ function forecastLead(index) {
   return index <= issueFrame ? 3 : Math.ceil((index - issueFrame) / 2);
 }
 
+function forecastWindow(index, comparison = false) {
+  const start = tms(comparison ? index : Math.min(index, issueFrame));
+  const lead = comparison ? 3 : forecastLead(index);
+  return `${clock(start)}–${clockWib(start + lead * 2 * halfHour)}`;
+}
+
 function frameRow(name, index) {
   if (name === "forecast") {
     const lead = forecastLead(index);
@@ -270,10 +294,10 @@ const palette = {
 };
 const P = () => palette[settings.theme === "system" ? (prefersLight.matches ? "light" : "dark") : settings.theme];
 const legend = {
-  fc: ["Chance of rain, next 3 h", ["under 20%", "20–40%", "40–60%", "60–80%", "80% or more"]],
+  fc: ["Chance of rain", ["under 20%", "20–40%", "40–60%", "60–80%", "80% or more"]],
   ob: ["Rain rate, mm/h (IMERG)", ["dry (under 0.1)", "0.1–1", "1–3", "3–8", "8 or more"]],
   bm: ["BMKG forecast", ["No rain", "Rain"]],
-  ds: ["Model vs BMKG, next 3 h", ["Agree", "Disagree"]],
+  ds: ["Model vs BMKG", ["Agree", "Disagree"]],
 };
 const layerData = { fc: "forecast", ob: "obs", bm: "bmkg", ds: "disagree" };
 const zoomBounds = {
@@ -295,7 +319,9 @@ function colorClass(value) {
 
 function drawLegend() {
   const [title, keys] = legend[layer];
-  $("legTitle").textContent = layer === "fc" ? `Chance of rain, next ${forecastLead(frame)} h` : title;
+  const window = meta && (layer === "fc" || layer === "ds")
+    ? `, ${forecastWindow(frame, layer === "ds")}` : "";
+  $("legTitle").textContent = title + window;
   $("legend").innerHTML = [...keys, "No data"].map((label, index) =>
     `<div class="row"><span class="sw" style="background:${P()[layer][index] ?? P().nodata}"></span>${label}</div>`
   ).join("");
@@ -495,7 +521,7 @@ function showTip(id, point) {
   const area = mapAreas.get(id);
   const value = valueAt(layerData[layer], frame, id);
   const description = value == null ? "No data for this time" : layer === "fc"
-    ? `${percent(value)} chance of rain · +${forecastLead(frame)} h` : layer === "ob"
+    ? `${percent(value)} chance of rain ${forecastWindow(frame)}` : layer === "ob"
       ? `${(value / 10).toFixed(1)} mm/h` : legend[layer][1][colorClass(value)];
   const cold = valueAt("cold", frame, id);
   const tip = $("tip");
@@ -698,7 +724,7 @@ function drawDrawer() {
   const obs = index => index <= issueFrame ? rain.get(index) ?? valueAt("obs", index, selected) : null;
   const forecast = index => valueAt("forecast", index, selected) ?? (index <= issueFrame ? prob.get(index) : null);
   const model = forecast(frame);
-  const modelLabel = `Our model, next ${forecastLead(frame)} h`;
+  const modelLabel = `Our model, rain <span style="white-space:nowrap">${forecastWindow(frame)}</span>`;
   const measured = obs(frame);
   const bm = valueAt("bmkg", frame, selected);
   const cloudRow = cloud.get(frame);
@@ -867,7 +893,7 @@ function renderOverview(ranking) {
   $("ovTop").innerHTML = top.map(row => `
     <tr><td><button class="linkbtn" data-open="${row.area_id}">${escape(areaById.get(row.area_id)?.label ?? row.name)}</button></td>
     <td class="note">${escape(row.island)}</td><td class="mono"><span class="bar" style="width:${row.prob_pct[3] / 2}px"></span>${percent(row.prob_pct[3])}</td>
-    <td class="num">${temp(row.tb_min)}</td><td><span class="chip">${bmkgText(row.bmkg)}</span></td></tr>`
+    <td class="num">${temp(row.tb_min)}</td><td>${bmkgText(row.bmkg, "chip")}</td></tr>`
   ).join("") || emptyRow(5, ranking ? "No ranked forecasts available." : "Forecast ranking unavailable.");
 }
 
@@ -896,7 +922,7 @@ function renderAlerts() {
       <td><span class="lvl ${row.level.toLowerCase()}">${row.level}</span></td><td>${label}</td><td class="note">${escape(row.island)}</td>
       ${leads.map(lead => `<td class="num">${percent(row.prob_pct[lead])}</td>`).join("")}
       <td class="num">${temp(row.tb_min)}</td><td class="num">${percent(row.cold_pct)}</td>
-      <td><span class="chip">${bmkgText(row.bmkg)}</span></td><td><button class="linkbtn" data-open="${row.area_id}">map</button></td></tr>`;
+      <td>${bmkgText(row.bmkg, "chip")}</td><td><button class="linkbtn" data-open="${row.area_id}">map</button></td></tr>`;
   }).join("") || emptyRow(11, !alertData.issue_slot ? "No forecast issue archived."
     : "No areas match. Lower the level or clear the search.");
 }

@@ -96,6 +96,20 @@ uv run --frozen nowcast model train --figure-prefix step-10
 - Target positive rate over the table: 20.2%, 25.6%, 30.0% for +1, +2, +3 h (sample month: 32.6%, 40.3%, 46.4%).
 - Validation BSS: 0.480, 0.460, 0.427. Validation reliability was within tolerance for every lead, so no isotonic calibration was fitted.
 - Best iteration was 2,000 for every lead, which is the `n_estimators` cap: validation log loss was still falling when training stopped.
+
+### Tree-Cap Check
+
+A retrain with `n_estimators: 8000` (same data, seed and learning rate) was killed by the kernel OOM killer after 48 min, while another session's Spark job ran beside it (trainer 3.9 GB RAM plus swap, swap full). Lead +1 h had finished, with 7,998 trees, so early stopping still did not fire. Scored on the 2024 validation split (4,514,976 rows):
+
+| +1 h trees | Brier | BSS | Log loss |
+|---|---|---|---|
+| 500 | 0.07760 | 0.4730 | 0.25031 |
+| 2,000 (live model) | 0.07664 | 0.4795 | 0.24699 |
+| 4,000 | 0.07630 | 0.4819 | 0.24581 |
+| 6,000 | 0.07615 | 0.4829 | 0.24529 |
+| 7,998 | 0.07606 | 0.4835 | 0.24496 |
+
+Four times the trees add 0.004 BSS, and each extra 2,000 trees adds less. The 2,000-tree model stays live and the cap stays at 2,000. A larger gain, if any, needs other parameters (`num_leaves`, learning rate), tuned on validation only.
 - The sample-month climatology was copied to `data/tmp/climatology-2025-01-sample.parquet` before the rebuild.
 
 ### Test Table
@@ -158,7 +172,7 @@ Top gain: +1 h `cold_pct` 46%, `tb_mean` 26%, `tb_min` 14%; +2 h `cold_pct` 41%,
 
 ## Live Scoring With the New Model
 
-The live scorer takes the newest folder in `models/`, so the new version took over with no config change. The 14:00 UTC slot was the first one scored with it (fast loop, `nowcast live score`):
+At the time the live scorer took the newest folder in `models/`, so the new version took over with no config change. The live model is now pinned in `model.live_version` (commit `ca535ac`, another session). The 14:00 UTC slot was the first one scored with it (fast loop, `nowcast live score`):
 
 ```
 2026-11-20T14:13:10Z INFO nowcast.sources.himawari: Himawari scan 2026-11-20T14:00:00+00:00 latency_min=11.91 model_slot=True
@@ -172,6 +186,6 @@ The live scorer takes the newest folder in `models/`, so the new version took ov
 - The full runs ran on the dev machine, not the server (juan, 2026-11-20). No containers or server move in this step.
 - NASA parallelism was 16 for the backfills, not 8 (benchmark above). IMERG and MERGIR never ran at the same time.
 - `test_2026` starts on 2026-03-01 as planned, but the archive switches to V07C on 2026-03-04, so its first 3 of 245 days are V07B.
-- The model reached the 2,000-tree cap on every lead. A longer run or a higher learning rate may still gain skill; tune on validation only.
+- The model reached the 2,000-tree cap on every lead. An 8,000-tree check on +1 h added only 0.004 validation BSS (see Tree-Cap Check).
 - `--check-repro` was not run on the full data (it doubles the 32 min); reproducibility was shown on the sample month and on a scratch copy with four splits.
 - Each run stops when a granule fails after its retries. Both stops were short NASA-side outages, and restarts were cheap because finished months and downloaded crops are kept.

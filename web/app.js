@@ -1417,6 +1417,13 @@ prefersLight.addEventListener("change", () => {
 });
 addEventListener("hashchange", show);
 
+const tabs = document.querySelector("nav.tabs");
+const updateTabCue = () => tabs.classList.toggle("more-tabs", tabs.scrollWidth - tabs.clientWidth - tabs.scrollLeft > 1);
+tabs.addEventListener("scroll", updateTabCue);
+const tabResize = new ResizeObserver(updateTabCue);
+tabResize.observe(tabs);
+for (const link of tabs.children) tabResize.observe(link);
+
 applyTheme();
 metaRequest = refreshMeta();
 initialAlerts = loadAlerts();

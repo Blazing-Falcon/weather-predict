@@ -44,6 +44,11 @@
         </dl>
       </div>
       <div class="card">
+        <div class="area-search">
+          <label for="areaSearch">Find kab/kota</label>
+          <input type="search" id="areaSearch" list="areaLabels" disabled>
+          <datalist id="areaLabels"></datalist>
+        </div>
         <span class="label">Layer</span>
         <div class="layers" id="layers">
           <label><input type="radio" name="layer" value="fc" checked>Our forecast<small>rain chance</small></label>
@@ -76,7 +81,7 @@
         <p class="note">Scored against IMERG rain. CSI is hits ÷ (hits + misses + false alarms). Caught is the share of rainy windows forecast. False is the share of rain forecasts that stayed dry. Click an area for its own panel.</p>
       </div>
       <div class="card" id="drawer" hidden>
-        <div class="drawer-head"><div><span class="label" id="dIsland">kab/kota</span><h2 id="dName"></h2></div><button type="button" class="x" id="dClose" aria-label="Close area panel">×</button></div>
+        <div class="drawer-head"><div><span class="label" id="dIsland">kab/kota</span><h2 id="dName" tabindex="-1"></h2></div><button type="button" class="x" id="dClose" aria-label="Close area panel">×</button></div>
         <div class="now4" id="dNow"></div>
         <div><span class="label">48 h back · 3 h ahead</span><svg id="dChart" viewBox="0 0 340 214" style="width:100%;display:block" role="img" aria-label="Area timeline"></svg></div>
         <p class="note" id="dDetail" aria-live="polite"></p><div style="display:flex;gap:8px;flex-wrap:wrap"><a href="#history" class="btn" id="dHist" style="text-decoration:none">Rain history</a><button type="button" class="btn" id="dWatch" aria-pressed="false">☆ Watch</button></div>

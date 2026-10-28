@@ -116,6 +116,7 @@ let ticks = [];
 let frame = issueFrame;
 let selected = null;
 let drawerDetailFailed = false;
+let drawerOpener = null;
 let historyA = null;
 let historyB = null;
 let historySelection = 0;
@@ -186,6 +187,7 @@ function initMeta(data) {
   for (const area of areas.toSorted((a, b) => a.label.localeCompare(b.label))) {
     $("hA").add(new Option(area.label, area.area_id));
     $("hB").add(new Option(area.label, area.area_id));
+    $("areaLabels").append(new Option("", area.label));
   }
   for (const island of islands) $("alIsland").add(new Option(island, island));
   const provinces = new Map(areas.filter(a => a.prov_code && a.prov_name).map(a => [a.prov_code, a.prov_name]));
@@ -610,8 +612,9 @@ async function initMap() {
     map.setFilter("kab-hover", ["==", ["get", "i"], -1]);
     $("tip").hidden = true;
   });
-  map.on("click", "kab-fill", event => openDrawer(event.features[0].properties.i, false));
+  map.on("click", "kab-fill", event => openDrawer(event.features[0].properties.i, false, map.getCanvas()));
   mapReady = true;
+  $("areaSearch").disabled = false;
   zoomTo(settings.zoom, false);
   loading.hidden = true;
 }
@@ -691,7 +694,7 @@ function tiles(id, values) {
     <span class="v">${value}</span><span class="d">${detail}</span></div>`).join("");
 }
 
-async function openDrawer(id, zoom) {
+async function openDrawer(id, zoom, opener) {
   const area = mapAreas.get(id);
   if (!area || !mapReady) return;
   selected = id;
@@ -704,6 +707,12 @@ async function openDrawer(id, zoom) {
     map.fitBounds([[x - 1.2, y - 0.8], [x + 1.2, y + 0.8]], { padding: mapPadding(), duration: 600 });
   }
   drawDrawer();
+  if (opener) {
+    drawerOpener = opener;
+    const narrow = innerWidth <= 820;
+    $("dName").focus({ preventScroll: narrow });
+    if (narrow) $("drawer").scrollIntoView({ block: "start" });
+  }
   if (!areaDetails.has(id)) {
     const stamp = archiveStamp(meta);
     const detail = await read(`/api/areas/${id}`, "Area details", "no-cache");
@@ -1241,12 +1250,12 @@ async function renderView(current) {
     renderMapStatus(pipeline);
     renderScoreboard(scores);
     if (mapReady) map.resize();
-    const zoom = pendingArea != null;
-    const id = pendingArea ?? selected ?? (!drawerClosed && innerWidth > 820 ? malangId : null);
+    const opener = pendingArea?.opener;
+    const id = pendingArea?.id ?? selected ?? (!drawerClosed && innerWidth > 820 ? malangId : null);
     pendingArea = null;
     await Promise.all([
       applyFrame(),
-      id != null && (zoom || !areaDetails.has(id)) ? openDrawer(id, zoom) : null,
+      id != null && (opener || !areaDetails.has(id)) ? openDrawer(id, Boolean(opener), opener) : null,
     ]);
   } else if (current === "overview") {
     const [ranking] = await Promise.all([
@@ -1317,8 +1326,8 @@ async function show() {
   if (nav === route) section.setAttribute("aria-busy", "false");
 }
 
-function goToArea(id) {
-  pendingArea = id;
+function goToArea(id, opener) {
+  pendingArea = { id, opener };
   frame = issueFrame;
   $("frame").value = frame;
   location.hash = "map";
@@ -1345,7 +1354,7 @@ function setFrame(index) {
 
 document.addEventListener("click", event => {
   const open = event.target.closest("[data-open]");
-  if (open) goToArea(Number(open.dataset.open));
+  if (open) goToArea(Number(open.dataset.open), open);
   const star = event.target.closest("[data-star]");
   if (star) {
     toggleWatch(Number(star.dataset.star));
@@ -1409,12 +1418,37 @@ $("dataRetry").addEventListener("click", async () => {
   await show();
   $("dataRetry").disabled = false;
 });
-$("dClose").addEventListener("click", () => {
+const areaSearch = $("areaSearch");
+function findArea(event) {
+  const area = areas.find(area => area.label === areaSearch.value);
+  if (!area) return;
+  event.preventDefault();
+  areaSearch.value = "";
+  openDrawer(area.area_id, true, areaSearch);
+}
+areaSearch.addEventListener("change", findArea);
+areaSearch.addEventListener("keydown", event => {
+  if (event.key === "Enter" && !event.isComposing) findArea(event);
+});
+
+function closeDrawer() {
   drawerClosed = true;
   selected = null;
   $("drawer").hidden = true;
   $("national").hidden = false;
   map.setFilter("kab-sel", ["==", ["get", "i"], -1]);
+  const opener = drawerOpener;
+  drawerOpener = null;
+  (opener?.isConnected && !opener.closest("[hidden]") ? opener : areaSearch).focus();
+}
+$("dClose").addEventListener("click", closeDrawer);
+document.addEventListener("keydown", event => {
+  if (event.defaultPrevented || event.key !== "Escape" || view !== "map" || $("drawer").hidden) return;
+  const target = event.target;
+  if (target !== areaSearch && target !== map.getCanvas()
+      && (!$("drawer").contains(target) || target.matches("input, textarea, [contenteditable]"))) return;
+  event.preventDefault();
+  closeDrawer();
 });
 $("dWatch").addEventListener("click", () => {
   toggleWatch(selected);

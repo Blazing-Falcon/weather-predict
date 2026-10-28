@@ -617,6 +617,15 @@ async function initMap() {
 }
 
 // Charts and area drawer
+const chartWidths = new WeakMap();
+function fitChart(svg) {
+  const box = svg.viewBox.baseVal;
+  const limit = chartWidths.get(svg) ?? box.width;
+  chartWidths.set(svg, limit);
+  box.width = Math.min(svg.clientWidth || limit, limit);
+  return box.width;
+}
+
 function traces(svg, series, x, y) {
   for (const { values, color, width = 2, dash = "0" } of series) {
     let path = "";
@@ -647,11 +656,11 @@ function lineChart(svg, w, h, series, { n, hi, yt, format, xt = [], marks = [] }
   for (const [index, label] of xt) {
     svg.append(svgEl("text", { x: x(index), y: h - 6, "text-anchor": "middle" }, label));
   }
-  for (const [index, label] of marks) {
+  marks.forEach(([index, label], i) => {
     svg.append(svgEl("line", { x1: x(index), x2: x(index), y1: top, y2: h - bottom,
       stroke: "var(--muted)", "stroke-dasharray": "3 3" }),
-    svgEl("text", { x: x(index) - 4, y: top + 9, "text-anchor": "end" }, label));
-  }
+    svgEl("text", { x: x(index) - 4, y: top + 9 + (w < 500 ? i * 13 : 0), "text-anchor": "end" }, label));
+  });
   traces(svg, series, x, y);
 }
 
@@ -841,10 +850,12 @@ function renderFreshness() {
 
 function renderOverview(ranking) {
   renderFreshness();
+  const share = $("ovShare"), island = $("ovIsland");
+  const shareWidth = fitChart(share), islandWidth = fitChart(island);
   if (!meta) {
     $("ovTime").textContent = "Archive metadata unavailable.";
-    chartNote($("ovShare"), "Rain share unavailable.");
-    chartNote($("ovIsland"), "Island forecasts unavailable.");
+    chartNote(share, "Rain share unavailable.");
+    chartNote(island, "Island forecasts unavailable.");
     $("ovTop").innerHTML = emptyRow(5, "Forecast ranking unavailable.");
     return;
   }
@@ -872,11 +883,12 @@ function renderOverview(ranking) {
   const shareFailed = ["prob1", "prob2", "prob3", "obs", "cold"].some(name => frameStamps.get(name) !== stamp);
   const shareValues = series.flatMap(line => line.values);
   if (shareFailed && shareValues.every(value => value == null)) {
-    chartNote($("ovShare"), "Rain share unavailable.");
+    chartNote(share, "Rain share unavailable.");
   } else {
     const hi = Math.max(0.3, Math.ceil(Math.max(...shareValues) * 10) / 10);
-    lineChart($("ovShare"), 760, 230, series, {
-      n: frameCount, hi, yt: Array.from({ length: Math.round(hi * 10) + 1 }, (_, i) => i / 10), format: pct, xt: ticks,
+    lineChart(share, shareWidth, 230, series, {
+      n: frameCount, hi, yt: Array.from({ length: Math.round(hi * 10) + 1 }, (_, i) => i / 10), format: pct,
+      xt: shareWidth < 500 ? ticks.filter(([, label]) => label !== "12:00") : ticks,
       marks: [[obsFrame, "IMERG"], [issueFrame, "issue"]].filter(([index]) => index >= 0),
     });
   }
@@ -885,8 +897,8 @@ function renderOverview(ranking) {
       .map(area => forecast?.[area.area_id]), value => value >= 60), "var(--blue)"]],
   }));
   if (rows.some(row => row.values[0][0] != null)) {
-    barsH($("ovIsland"), 460, 230, rows, { max: Math.max(0.2, ...rows.map(row => row.values[0][0])), format: pct });
-  } else chartNote($("ovIsland"), !ranking && frameStamps.get("prob3") !== stamp
+    barsH(island, islandWidth, 230, rows, { max: Math.max(0.2, ...rows.map(row => row.values[0][0])), format: pct });
+  } else chartNote(island, !ranking && frameStamps.get("prob3") !== stamp
     ? "Island forecasts unavailable." : "No island forecasts archived.");
   const top = (ranking?.alerts ?? []).filter(row => row.prob_pct[3] != null)
     .sort((a, b) => b.prob_pct[3] - a.prob_pct[3]).slice(0, 10);
@@ -897,7 +909,16 @@ function renderOverview(ranking) {
   ).join("") || emptyRow(5, ranking ? "No ranked forecasts available." : "Forecast ranking unavailable.");
 }
 
+const alertSort = $("alSort");
+const alertSortHeaders = document.querySelectorAll("[data-alert-sort]");
+const alertLabel = row => areaById.get(row.area_id)?.label ?? row.name;
+
 function renderAlerts() {
+  const [key, direction] = (alertSort.value || "rank-descending").split("-");
+  for (const button of alertSortHeaders) {
+    if (button.dataset.alertSort === key) button.parentElement.setAttribute("aria-sort", direction);
+    else button.parentElement.removeAttribute("aria-sort");
+  }
   if (!alertData) {
     $("alCount").textContent = "Alerts unavailable";
     $("alTime").textContent = "";
@@ -910,19 +931,29 @@ function renderAlerts() {
   const minimum = Number($("alLvl").value);
   const onlyWatch = $("alWatch").checked;
   const rows = alertData.alerts.filter(row => {
-    const label = areaById.get(row.area_id)?.label ?? row.name ?? "";
+    const label = alertLabel(row);
     return row.rank >= minimum && (!island || row.island === island) && (!province || row.province_code === province)
       && (!q || label.toLowerCase().includes(q)) && (!onlyWatch || watch.has(row.area_id));
   });
+  if (alertSort.value) {
+    const value = row => key === "name" ? alertLabel(row)
+      : key === "rank" ? row.rank : key === "cloud" ? row.tb_min : row.prob_pct[key];
+    const sign = direction === "ascending" ? 1 : -1;
+    rows.sort((a, b) => {
+      const left = value(a), right = value(b);
+      if (left == null || right == null) return Number(left == null) - Number(right == null);
+      return sign * (key === "name" ? left.localeCompare(right, "id") : left - right);
+    });
+  }
   $("alCount").textContent = count(rows.length) + (rows.length === 1 ? " area" : " areas");
   $("alTime").textContent = alertData.issue_slot ? `Issued ${fmtTime(alertData.issue_slot)}` : "No alert issue available";
   $("alBody").innerHTML = rows.map(row => {
-    const label = escape(areaById.get(row.area_id)?.label ?? row.name);
-    return `<tr><td><button class="star" data-star="${row.area_id}" aria-pressed="${watch.has(row.area_id)}" aria-label="Watch ${label}">★</button></td>
-      <td><span class="lvl ${row.level.toLowerCase()}">${row.level}</span></td><td>${label}</td><td class="note">${escape(row.island)}</td>
-      ${leads.map(lead => `<td class="num">${percent(row.prob_pct[lead])}</td>`).join("")}
-      <td class="num">${temp(row.tb_min)}</td><td class="num">${percent(row.cold_pct)}</td>
-      <td>${bmkgText(row.bmkg, "chip")}</td><td><button class="linkbtn" data-open="${row.area_id}">map</button></td></tr>`;
+    const label = escape(alertLabel(row));
+    return `<tr class="al-row"><td><button class="star" data-star="${row.area_id}" aria-pressed="${watch.has(row.area_id)}" aria-label="Watch ${label}">★</button></td>
+      <td><span class="lvl ${row.level.toLowerCase()}">${row.level}</span></td><td class="al-name">${label}</td><td class="note al-detail">${escape(row.island)}</td>
+      ${leads.map(lead => `<td class="num al-detail" data-lead="+${lead} h">${percent(row.prob_pct[lead])}</td>`).join("")}
+      <td class="num al-detail al-cloud">${temp(row.tb_min)}</td><td class="num al-cold">${percent(row.cold_pct)}</td>
+      <td class="al-detail al-bmkg">${bmkgText(row.bmkg, "chip")}</td><td class="al-map"><button class="linkbtn" data-open="${row.area_id}">map</button></td></tr>`;
   }).join("") || emptyRow(11, !alertData.issue_slot ? "No forecast issue archived."
     : "No areas match. Lower the level or clear the search.");
 }
@@ -939,6 +970,9 @@ async function loadAlerts() {
 
 // Model, history, pipeline and settings
 function renderModel(data) {
+  const calibration = $("mdCal"), hour = $("mdHour"), island = $("mdIsland"), feature = $("mdFeat");
+  const calWidth = fitChart(calibration), hourWidth = fitChart(hour);
+  const islandWidth = fitChart(island), featureWidth = fitChart(feature);
   if (!data) {
     $("mdSplit").textContent = "Model results unavailable.";
     $("mdTiles").replaceChildren();
@@ -969,22 +1003,23 @@ function renderModel(data) {
     ["AUC", decimal(model?.auc), `${count(model?.n)} scored test rows`, "orange"],
   ]);
   const bins = lead?.reliability.test.model.filter(row => row.count > 0) ?? [];
-  const calibration = $("mdCal");
   if (bins.length) {
     calibration.replaceChildren();
-    const x = value => 42 + value * 394;
+    const x = value => 42 + value * (calWidth - 66);
     const y = value => 10 + (1 - value) * 256;
     for (const value of [0, 0.25, 0.5, 0.75, 1]) {
       calibration.append(
-        svgEl("line", { x1: 42, x2: 436, y1: y(value), y2: y(value), stroke: "var(--line)" }),
+        svgEl("line", { x1: x(0), x2: x(1), y1: y(value), y2: y(value), stroke: "var(--line)" }),
         svgEl("text", { x: 36, y: y(value) + 3.5, "text-anchor": "end" }, pct(value)),
-        svgEl("text", { x: x(value), y: 280, "text-anchor": "middle" }, pct(value)));
+        svgEl("text", { x: x(value), y: calWidth < 460 ? 282 : 280, "text-anchor": "middle" }, pct(value)));
     }
-    calibration.append(svgEl("text", { x: 239, y: 296, "text-anchor": "middle" }, "forecast chance"),
+    calibration.append(svgEl("text", { x: x(0.5), y: 296, "text-anchor": "middle" }, "forecast chance"),
       svgEl("line", { x1: x(0), y1: y(0), x2: x(1), y2: y(1), stroke: "var(--gray)", "stroke-dasharray": "4 4" }),
       svgEl("polyline", { points: bins.map(row => `${x(row.mean_predicted)},${y(row.observed_frequency)}`).join(" "),
-        fill: "none", stroke: "var(--blue)", "stroke-width": 1.5 }),
-      svgEl("text", { x: 48, y: 28 }, "perfect = dashed line · dot size = count"));
+        fill: "none", stroke: "var(--blue)", "stroke-width": 1.5 }));
+    const notes = calWidth < 460 ? ["perfect = dashed line", "dot size = count"]
+      : ["perfect = dashed line · dot size = count"];
+    notes.forEach((note, i) => calibration.append(svgEl("text", { x: 48, y: 28 + i * 14 }, note)));
     for (const row of bins) calibration.append(svgEl("circle", { cx: x(row.mean_predicted),
       cy: y(row.observed_frequency), r: 3 + Math.min(7, Math.log10(row.count) * 1.6), fill: "var(--blue)", opacity: 0.85 }));
   } else chartNote(calibration, "No calibration data archived.");
@@ -997,23 +1032,23 @@ function renderModel(data) {
       color: scoreNames[source][1],
       values: Array.from({ length: 24 }, (_, hour) => hourly.find(row => row.source === source && row.hour_local === hour)?.csi),
     }));
-    lineChart($("mdHour"), 460, 300, series, { n: 24, hi: 1, yt: [0, 0.25, 0.5, 0.75, 1],
+    lineChart(hour, hourWidth, 300, series, { n: 24, hi: 1, yt: [0, 0.25, 0.5, 0.75, 1],
       format: decimal, xt: [[0, "00"], [6, "06"], [12, "12"], [18, "18"], [23, "23"]] });
-  } else chartNote($("mdHour"), "No verified hourly CSI yet.");
+  } else chartNote(hour, "No verified hourly CSI yet.");
   const modelIslands = meta ? islands : [...new Set(regional.map(row => row.island))];
   const regionRows = modelIslands.map(island => ({ label: island, values: ["model", "motion"].map(source =>
     [regional.find(row => row.island === island && row.source === source)?.csi, scoreNames[source][1]]) }));
   if (regionRows.some(row => row.values.some(([value]) => value != null))) {
-    barsH($("mdIsland"), 460, 260, regionRows, { max: 1, format: decimal });
-  } else chartNote($("mdIsland"), "No verified island CSI yet.");
+    barsH(island, islandWidth, 260, regionRows, { max: 1, format: decimal });
+  } else chartNote(island, "No verified island CSI yet.");
 
   const gains = Object.entries(lead?.feature_importance ?? {}).filter(([, value]) => value > 0);
   gains.sort((a, b) => b[1] - a[1]);
   if (gains.length) {
     const rows = gains.slice(0, 10).map(([label, value]) => ({ label, values: [[value,
       /^(adv|flow)/.test(label) ? "var(--purple)" : "var(--aqua)"]] }));
-    barsH($("mdFeat"), 460, 260, rows, { max: gains[0][1] * 1.1, format: pct, left: 150 });
-  } else chartNote($("mdFeat"), "No feature importance archived.");
+    barsH(feature, featureWidth, 260, rows, { max: gains[0][1] * 1.1, format: pct, left: 150 });
+  } else chartNote(feature, "No feature importance archived.");
   $("mdRunsNote").textContent = scores?.nomotion
     ? "Brier skill compares each forecast with local climatology."
     : "Brier skill compares each forecast with local climatology. The model card has no separate test without cloud motion.";
@@ -1037,6 +1072,7 @@ async function renderHistory() {
   const primary = history.find(data => data.area_id === historyA);
   const a = areaById.get(historyA);
   const heat = $("hHeat");
+  const heatWidth = fitChart(heat);
   $("hHeatT").textContent = a ? "When it rains in " + a.label : "When it rains";
   $("hCoverage").textContent = primary?.monthly.length
     ? `${count(primary.monthly.reduce((sum, row) => sum + row.slots, 0))} archived slots` : "No archived rain";
@@ -1045,7 +1081,7 @@ async function renderHistory() {
     : "Mean wet share · no climatology available";
   const cells = new Map(primary?.climatology.map(row => [row.month * 24 + row.hour_local, row.wet_pct]));
   heat.replaceChildren();
-  const cw = 562 / 24, ch = 236 / 12;
+  const cw = (heatWidth - 38) / 24, ch = 236 / 12;
   months.forEach((month, index) => {
     const y = 4 + index * ch;
     heat.append(svgEl("text", { x: 28, y: y + ch / 2 + 3.5, "text-anchor": "end" }, month));
@@ -1057,7 +1093,7 @@ async function renderHistory() {
       heat.append(rect);
     }
   });
-  for (let hour = 0; hour < 24; hour += 3) {
+  for (let hour = 0; hour < 24; hour += cw * 3 < 24 ? 6 : 3) {
     heat.append(svgEl("text", { x: 34 + (hour + 0.5) * cw, y: 255, "text-anchor": "middle" },
       String(hour).padStart(2, "0") + "h"));
   }
@@ -1068,13 +1104,15 @@ async function renderHistory() {
     `<span><i style="background:${historyColor(data)}"></i>${escape(areaById.get(data.area_id).label)}</span>`).join("");
 
   const yearChart = $("hYear");
+  const yearWidth = fitChart(yearChart);
   if (years.length) {
     yearChart.replaceChildren();
-    const step = (440 - 46 - 8) / years.length;
+    const step = (yearWidth - 54) / years.length;
+    const labelEvery = Math.ceil(30 / step);
     const max = Math.max(1, ...history.flatMap(data => data.yearly.map(row => row.rain_mm))) * 1.1;
     const y = value => 10 + (1 - value / max) * 222;
     for (const value of [0, max / 4, max / 2, max * 0.75, max]) {
-      yearChart.append(svgEl("line", { x1: 46, x2: 432, y1: y(value), y2: y(value), stroke: "var(--line)" }),
+      yearChart.append(svgEl("line", { x1: 46, x2: yearWidth - 8, y1: y(value), y2: y(value), stroke: "var(--line)" }),
         svgEl("text", { x: 40, y: y(value) + 3, "text-anchor": "end" }, count(Math.round(value))));
     }
     years.forEach((year, index) => {
@@ -1088,19 +1126,23 @@ async function renderHistory() {
         rect.append(svgEl("title", {}, `${decimal(row.rain_mm, 1)} mm over ${count(row.slots)} slots`));
         yearChart.append(rect);
       });
-      yearChart.append(svgEl("text", { x: center, y: 250, "text-anchor": "middle" }, year));
+      if (index % labelEvery === 0) yearChart.append(svgEl("text", { x: center, y: 250, "text-anchor": "middle" }, year));
     });
   } else chartNote(yearChart, "No yearly totals archived.");
 
   const season = $("hSeason");
+  const seasonWidth = fitChart(season);
   const hasSeason = history.some(data => data.wet_season.some(row => row.onset_month != null));
   if (hasSeason) {
     season.replaceChildren();
-    const x = month => 65 + month / 12 * 1115;
+    const step = (seasonWidth - 85) / 12;
+    const x = month => 65 + month * step;
     const barHeight = 174 / years.length;
     for (let index = 0; index < 12; index++) {
-      season.append(svgEl("line", { x1: x(index), x2: x(index), y1: 8, y2: 190, stroke: "var(--line)" }),
-        svgEl("text", { x: x(index) + 4, y: 210 }, months[(index + 8) % 12]));
+      season.append(svgEl("line", { x1: x(index), x2: x(index), y1: 8, y2: 190, stroke: "var(--line)" }));
+      if (step >= 24 || index % 2 === 0) {
+        season.append(svgEl("text", { x: x(index) + 4, y: 210 }, months[(index + 8) % 12]));
+      }
     }
     years.forEach((year, index) => {
       const top = 8 + index * barHeight;
@@ -1384,6 +1426,17 @@ $("dHist").addEventListener("click", () => {
 for (const id of ["alQ", "alIsland", "alProvince", "alLvl", "alWatch"]) {
   $(id).addEventListener("input", renderAlerts);
 }
+alertSort.addEventListener("change", renderAlerts);
+for (const button of alertSortHeaders) {
+  button.addEventListener("click", () => {
+    const key = button.dataset.alertSort;
+    const current = button.parentElement.getAttribute("aria-sort");
+    const direction = current ? (current === "descending" ? "ascending" : "descending")
+      : key === "name" || key === "cloud" ? "ascending" : "descending";
+    alertSort.value = `${key}-${direction}`;
+    renderAlerts();
+  });
+}
 $("hA").addEventListener("change", event => {
   historyA = Number(event.target.value);
   if (historyA === historyB) historyB = null;
@@ -1416,6 +1469,13 @@ prefersLight.addEventListener("change", () => {
   if (settings.theme === "system") applyTheme();
 });
 addEventListener("hashchange", show);
+let resizeTimer;
+addEventListener("resize", () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => {
+    if (["overview", "model", "history"].includes(view)) renderView(view);
+  }, 200);
+});
 
 const tabs = document.querySelector("nav.tabs");
 const updateTabCue = () => tabs.classList.toggle("more-tabs", tabs.scrollWidth - tabs.clientWidth - tabs.scrollLeft > 1);

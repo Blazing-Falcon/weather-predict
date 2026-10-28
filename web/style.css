@@ -159,6 +159,36 @@ input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;bac
 .star{background:none;border:0;cursor:pointer;font-size:16px;color:var(--muted);padding:0 4px}
 .star[aria-pressed="true"]{color:var(--yellow)}
 .linkbtn{background:none;border:0;color:var(--blue);cursor:pointer;font:inherit;font-size:12.5px;padding:0;text-decoration:underline}
+#alSort{display:none}
+[data-alert-sort]{background:none;border:0;padding:0;color:inherit;font:inherit;letter-spacing:inherit;text-transform:inherit;cursor:pointer}
+[data-alert-sort]:hover{color:var(--fg0)}
+[data-alert-sort]::after{content:" ↕" / "";color:var(--gray)}
+[aria-sort="ascending"]>[data-alert-sort]::after{content:" ↑" / "";color:var(--fg0)}
+[aria-sort="descending"]>[data-alert-sort]::after{content:" ↓" / "";color:var(--fg0)}
+@media (max-width:560px){
+  #alSort{display:block}
+  #view-alerts .panel{padding-inline:8px}
+  #view-alerts .filters{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+  #view-alerts .filters :is(select,input[type=search]){min-width:0}
+  #alCount{grid-column:1/-1}
+  #view-alerts .scroll-x{overflow:visible}
+  #view-alerts thead,#view-alerts .al-cold{display:none}
+  #view-alerts .al-row{display:flex;flex-wrap:wrap;align-items:center;column-gap:8px;padding-bottom:5px;border-bottom:1px solid var(--line)}
+  #view-alerts .al-row:last-child{border-bottom:0}
+  #view-alerts .al-row td{padding:0;border:0}
+  #view-alerts .al-name{flex:1;min-width:0;overflow-wrap:anywhere}
+  #view-alerts .al-map{order:1}
+  #view-alerts .al-row::before,#view-alerts .al-row::after{content:"";width:100%}
+  #view-alerts .al-row::before{order:2}
+  #view-alerts .al-row::after{order:4}
+  #view-alerts .al-detail{order:3;color:var(--muted);font:12px/1.5 var(--f-ui);font-variant-numeric:tabular-nums;white-space:nowrap}
+  #view-alerts :is(.al-cloud,.al-bmkg){order:5}
+  #view-alerts [data-lead]::before{content:attr(data-lead) " "}
+  #view-alerts [data-lead] + [data-lead]::before{content:"· " attr(data-lead) " "}
+  #view-alerts .al-cloud::before{content:"Cloud top "}
+  #view-alerts .al-bmkg::before{content:"BMKG "}
+  #view-alerts .al-bmkg .chip{border:0;padding:0;font:inherit}
+}
 .star,.linkbtn{min-width:24px;min-height:24px}
 td:has(> :is(.star,.linkbtn)){padding-block:0}
 .fresh{display:grid;grid-template-columns:auto 1fr auto;gap:4px 12px;font-size:13px;align-items:center}

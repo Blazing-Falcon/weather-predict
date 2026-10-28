@@ -2,6 +2,10 @@
 
 Date: 2026-11-20. Scope: the seven views of `web/` at 1440 px and 390 px, dark and light, against `reference/mockup-v6/` and `reference/webapp.md`. A Codex researcher (gpt-6.2-astra, read-only) wrote the first draft from 176 headless Chromium screenshots and DOM metrics. Claude checked the main claims in the code, the screenshots and the live API, corrected two, dropped none and added two. Screenshots and `metrics.json` are in `data/tmp/ui-audit/` (not in git).
 
+## Status
+
+juan picked A01 to A12; all twelve are fixed (see `docs/progress/step-09-ui-polish.md`). A13 to A26 are open.
+
 ## Summary
 
 The app matches the mockup layout well and is faster than the mockup on every page (non-map views ready in 0.22 to 0.45 s). The main problems are information that can be wrong or stale (LIVE pill, drawer data, the History period, forecast-lead labels), weak error states, light-theme contrast on small text, and a 390 px layout that hides key alert values and makes some charts unreadable.

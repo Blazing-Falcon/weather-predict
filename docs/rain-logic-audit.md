@@ -91,7 +91,7 @@ juan picked findings 1, 2, 3, 4 and 7. UI findings 5, 6 and the hindcast label i
 | 1 | `efe679a` | Each IMERG tick also searches the last 12 h and fetches any slot missing from the silver manifest. |
 | 3 | `973d031` | Verification fills `clim_pct` for rows that have none, on the next verify run. |
 | 4 | `cb39db5` | Persistence and motion (0 or 1) are scored at 0.5 in daily scores and in new model cards. |
-| 7 | pending | Hindcast rerun with the live model waits until the 8000-tree retrain frees memory. |
+| 7 | data only | Hindcast for 2026-11-18 02:00 to 11-19 23:00 rerun with `20261120T1329Z-a2f52f2` (90 slots, 138,780 rows, 4 min 46 s, 787 MB peak). |
 
 Checked on live data after the loops ran the new code:
 
@@ -100,5 +100,17 @@ Checked on live data after the loops ran the new code:
 - Finding 4: daily scores for 2026-11-20, computed into `data/tmp` (since deleted): persistence CSI is 0.103, 0.086, 0.076 for +1, +2, +3 h, against base rates 0.269, 0.374, 0.466 that the old cutoff would have given.
 - Finding 2: the scorer and the API read `live_version`; tests cover both (`tests/test_live.py`, `tests/test_api.py`). Full suite: 153 passed.
 - The same daily scores show that the retired sample model was below climatology for all of 2026-11-20 (model BSS -0.34, -0.25, -0.49). The live model has no verified window yet.
+- Finding 7: the 19:49 frames build shows the new hindcast. All 138,780 `prob` frame values for those slots equal the live-model rows, and `/api/frames` serves them (mean +1 h chance at 2026-11-19 06:00 is 40.9%, against 6.7% from the old model). The old-model rows stay in `gold/hindcast` as history.
 
-To finish finding 7 after the retrain: `nowcast live hindcast --start 2026-11-18T02:00:00+00:00 --end 2026-11-19T23:00:00+00:00`. It adds rows for the live version, and frames already prefer the newest version per slot.
+Hindcast scored against IMERG (complete windows, BSS against the same climatology):
+
+| Model | Lead | Base Rate | Mean p | BSS |
+|---|---|---|---|---|
+| Old sample | +1 h | 0.260 | 0.058 | -0.115 |
+| Old sample | +2 h | 0.336 | 0.186 | 0.116 |
+| Old sample | +3 h | 0.399 | 0.210 | -0.008 |
+| Live | +1 h | 0.260 | 0.243 | 0.388 |
+| Live | +2 h | 0.336 | 0.313 | 0.340 |
+| Live | +3 h | 0.399 | 0.366 | 0.284 |
+
+The live model is well calibrated on Himawari input. Each 10% bin is within 3 points of its observed rate at +1 h, and slightly low in the 10-30% bins at +3 h (14.1% predicted against 21.8% observed). This answers the open question above: on these 48 h, the Himawari features do not make the live model too low. It is below the MERGIR test BSS (0.48, 0.46, 0.42), so keep checking as more days are verified. Non-monotone triplets in this hindcast: 929 of 46,260 (2.0%), finding 8.

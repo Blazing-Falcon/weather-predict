@@ -28,6 +28,7 @@ Date: 2026-11-20. Input: `docs/ui-audit.md` (26 findings). juan picked A01 to A1
 ## Open Points
 
 - Planned (juan, not built): configurable replay window up to 1 month. Needs the 7-day API span cap and the 7-day frame and cloud tile retention raised, the 1 to 17 Nov 2026 rain and cloud gap filled, and about 30 days of hindcast built.
+- Planned (juan, not built): end the slider at the latest issue and drop the 3 h forward part, which only showed the same issue at leads 1 to 3. A "next 1 h | 2 h | 3 h" toggle on the forecast layer replaces it and also works on past frames. This differs from the guide's "3 h forward" slider, by juan's choice.
 - A13 to A26 (raster failure note, legends, clipped credits on the 1440 px left card, drawer chart keys, time zones on day changes, Pipeline mobile order, slider `aria-valuetext`, first paint, Model KPI labels and the low items).
 - `config.settings()` is cached for the life of the API process, so any config change needs an API restart.
 - The drawer heading uses the browser's default focus outline, not the yellow ring.

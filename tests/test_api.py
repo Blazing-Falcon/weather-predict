@@ -188,16 +188,20 @@ def test_frames_and_cache(client, archive, tmp_path):
     )
     assert finished.json()["slots"] == [old.isoformat()]
     assert finished.headers["cache-control"] == "public, max-age=86400"
-    assert (
-        client.get(
+    for days, status in [(31, 200), (32, 422)]:
+        response = client.get(
             "/api/frames",
             params={
-                "from": (slot - timedelta(days=8)).isoformat(),
+                "layer": "obs",
+                "from": (slot - timedelta(days=days)).isoformat(),
                 "to": slot.isoformat(),
             },
-        ).status_code
-        == 422
-    )
+        )
+        assert response.status_code == status
+        if days == 31:
+            assert response.json()["slots"] == [old.isoformat(), slot.isoformat()]
+        else:
+            assert response.json()["detail"].endswith("span at most 31 days.")
 
     tile = f"{old:%Y%m%dT%H%MZ}"
     path = tmp_path / "gold" / "tiles" / "rain" / f"{tile}.png"

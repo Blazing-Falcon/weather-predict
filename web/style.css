@@ -57,7 +57,7 @@ td.num,th.num{text-align:right;font-family:var(--f-mono);font-variant-numeric:ta
 .key{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px}
 .btn{font-family:var(--f-mono);font-size:12px;padding:4px 9px;border-radius:4px;border:1px solid var(--line);background:var(--panel);color:var(--muted);cursor:pointer}
 .btn:hover{color:var(--fg0);border-color:var(--line2)}
-.btn[aria-pressed="true"]{background:var(--panel2);color:var(--fg0);border-color:var(--yellow)}
+.btn[aria-pressed="true"],#forecastWindow .btn:has(:checked){background:var(--panel2);color:var(--fg0);border-color:var(--yellow)}
 select,input[type=search]{font:inherit;font-size:13px;padding:5px 8px;border-radius:4px;border:1px solid var(--line);background:var(--panel);color:var(--fg)}
 .lvl{display:inline-block;font-family:var(--f-mono);font-size:11px;font-weight:700;padding:1px 7px;border-radius:3px;border:1px solid currentColor;white-space:nowrap}
 .lvl.awas{color:var(--red)} .lvl.siaga{color:var(--orange)} .lvl.waspada{color:var(--waspada)}
@@ -90,6 +90,9 @@ input[type=radio],input[type=checkbox]{accent-color:var(--yellow);margin:0}
 .toggle{display:flex;align-items:center;gap:8px;font-size:13px;padding:3px 8px;cursor:pointer}
 .toggle.disabled{opacity:.45;cursor:not-allowed}
 .btnrow{display:flex;gap:4px;flex-wrap:wrap}
+#forecastWindow .btn{position:relative;display:flex;align-items:center;justify-content:center}
+#forecastWindow input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}
+#forecastWindow .btn:has(:focus-visible){outline:2px solid var(--yellow);outline-offset:2px}
 .legend{display:flex;flex-direction:column;gap:4px;font-size:12.5px}
 .legend .row{display:flex;align-items:center;gap:8px}
 .sw{width:14px;height:14px;border-radius:2px;border:1px solid var(--line);flex:0 0 auto}
@@ -107,13 +110,12 @@ input[type=radio],input[type=checkbox]{accent-color:var(--yellow);margin:0}
 .track{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:2px}
 .trackbar{position:relative;height:30px}
 .trackbar .deco{position:absolute;left:8px;right:8px;top:0;bottom:0;pointer-events:none}
-.deco .fut{position:absolute;top:calc(50% - 4px);height:8px;background:repeating-linear-gradient(45deg,color-mix(in srgb,var(--orange) 35%,transparent) 0 4px,transparent 4px 8px);border-radius:2px}
 .deco .gap{position:absolute;top:calc(50% - 4px);height:8px;background:repeating-linear-gradient(-45deg,color-mix(in srgb,var(--gray) 40%,transparent) 0 3px,transparent 3px 6px);border-radius:2px}
 .deco .mk{position:absolute;top:0;bottom:0;width:0;border-left:1px dashed var(--muted)}
-.deco .mk.now{border-left:2px solid var(--fg0)}
+.deco .mk.now{left:100%;border-left:2px solid var(--fg0)}
 .deco .mk span{position:absolute;top:-2px;font-family:var(--f-mono);font-size:10px;color:var(--muted);white-space:nowrap}
-.deco .mk.now span{left:4px;color:var(--fg0)}
-.deco .mk.sat span{right:4px}
+.deco .mk.now span{right:4px;color:var(--fg0)}
+.deco .mk.sat span{right:4px;top:auto;bottom:-2px}
 input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:16px;background:transparent;margin:0}
 .trackbar input[type=range]{position:absolute;left:0;right:0;top:50%;transform:translateY(-50%)}
 input[type=range]::-webkit-slider-runnable-track{height:4px;background:var(--line);border-radius:2px}
@@ -138,7 +140,10 @@ input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;bac
   .ov{position:static;width:auto;max-height:none;overflow:visible;padding:10px max(16px,env(safe-area-inset-right,0px)) 0 max(16px,env(safe-area-inset-left,0px))}
   .ov-bottom{order:2} .ov-left{order:3} .ov-right{order:4;padding-bottom:24px}
   #drawer{scroll-margin-top:calc(var(--hdr) + 2px + env(safe-area-inset-top,0px))}
-  .slider{flex-wrap:wrap} .when{min-width:0;align-items:flex-start;order:-1;flex-basis:100%}
+  .slider{flex-wrap:wrap} .when{min-width:0;align-items:flex-start;order:-1;flex:1}
+  .track{order:1;flex-basis:100%}
+  #replay{min-height:44px}
+  #forecastWindow .btn{min-width:46px;min-height:46px}
   .banner{position:static;transform:none;order:2;margin:10px 16px 0}
 }
 
@@ -251,5 +256,8 @@ summary{cursor:pointer;color:var(--muted)}
 }
 @media (max-width:420px){
   .fresh{gap:4px 6px}
-  .ticks span:first-child{transform:none}
+}
+@media (max-width:360px){
+  .when{flex-basis:100%}
+  .ticks span{font-size:9px}
 }

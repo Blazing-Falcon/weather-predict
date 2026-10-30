@@ -15,9 +15,9 @@ datasets:
   gold/predictions:      {keep: 12 months}
   gold/verification:     {keep: 12 months}
   gold/scores_daily:     {keep: 10 years}
-  gold/map_frames:       {keep: 7 days}
-  gold/tiles/rain:       {keep: 30 days}
-  gold/tiles/cloud:      {keep: 7 days}
+  gold/map_frames:       {keep: 31 days}
+  gold/tiles/rain:       {keep: 31 days}
+  gold/tiles/cloud:      {keep: 31 days}
   models:                {keep_versions: 5}
   dagster_runs:          {keep: 30 days}
   dagster_compute_logs:  {keep: 30 days}

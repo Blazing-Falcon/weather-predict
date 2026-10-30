@@ -66,6 +66,11 @@
       </div>
       <div class="card">
         <span class="label" id="legTitle"></span>
+        <div class="btnrow" id="forecastWindow" role="radiogroup" aria-label="Forecast window">
+          <label class="btn"><input type="radio" name="lead" value="1" aria-label="Next 1 h">Next 1 h</label>
+          <label class="btn"><input type="radio" name="lead" value="2" aria-label="Next 2 h">2 h</label>
+          <label class="btn"><input type="radio" name="lead" value="3" aria-label="Next 3 h" checked>3 h</label>
+        </div>
         <div class="legend" id="legend"></div>
         <p class="note" id="layerNote" hidden></p>
         <p class="note" id="cloudTileNote" hidden>No cloud image archived for this time.</p>
@@ -83,15 +88,18 @@
       <div class="card" id="drawer" hidden>
         <div class="drawer-head"><div><span class="label" id="dIsland">kab/kota</span><h2 id="dName" tabindex="-1"></h2></div><button type="button" class="x" id="dClose" aria-label="Close area panel">×</button></div>
         <div class="now4" id="dNow"></div>
-        <div><span class="label">48 h back · 3 h ahead</span><svg id="dChart" viewBox="0 0 340 214" style="width:100%;display:block" role="img" aria-label="Area timeline"></svg></div>
+        <div><span class="label">Last 48 h</span><svg id="dChart" viewBox="0 0 340 214" style="width:100%;display:block" role="img" aria-label="Area timeline"></svg></div>
         <p class="note" id="dDetail" aria-live="polite"></p><div style="display:flex;gap:8px;flex-wrap:wrap"><a href="#history" class="btn" id="dHist" style="text-decoration:none">Rain history</a><button type="button" class="btn" id="dWatch" aria-pressed="false">☆ Watch</button></div>
       </div>
     </div>
     <div class="ov ov-bottom">
       <div class="card slider">
         <button type="button" class="play" id="play" aria-label="Play" disabled>▶</button>
+        <select id="replay" aria-label="Replay">
+          <option value="48">48 h</option><option value="168">7 days</option><option value="720">30 days</option>
+        </select>
         <div class="track">
-          <div class="trackbar"><div class="deco" id="deco"></div><input type="range" id="frame" min="0" max="102" step="1" value="96" aria-label="Time"></div>
+          <div class="trackbar"><div class="deco" id="deco"></div><input type="range" id="frame" min="0" max="96" step="1" value="96" aria-label="Time"></div>
           <div class="ticks" id="ticks"></div>
         </div>
         <div class="when"><span class="t" id="wT"></span><span class="s" id="wS"></span></div>
@@ -105,7 +113,7 @@
   <div class="page-head"><h1>Indonesia right now</h1><span class="note mono" id="ovTime"></span></div>
   <div class="grid" id="ovTiles"></div>
   <div class="grid">
-    <div class="panel s8"><div class="phead"><h2>Share of kab/kota with rain</h2><span class="note">48 h back, 3 h ahead</span></div>
+    <div class="panel s8"><div class="phead"><h2>Share of kab/kota with rain</h2><span class="note">Last 48 h</span></div>
       <svg id="ovShare" viewBox="0 0 760 230" style="width:100%;display:block" role="img" aria-label="Share of areas with rain over time"></svg>
       <div class="legendh"><span><i style="background:var(--aqua)"></i>Observed rain (IMERG)</span><span><i style="background:var(--fg)"></i>Under cold cloud (Himawari)</span><span><i style="background:var(--blue)"></i>Our expected share</span></div>
     </div>
@@ -274,7 +282,7 @@
     <div class="panel stage-c"><span class="label">Ingest</span><h3>Run when data lands</h3><span class="when2">Himawari every 10 min · IMERG every 30 min · BMKG every 3 h</span><p>Dagster sensors check for the next file and start the chain the moment it exists. Himawari comes as raw Band 13 from NOAA's public AWS bucket, about 12 min after each scan, and only the 2 or 3 segments over Indonesia are read. NASA's OPeNDAP service crops IMERG Early to the Indonesia box. BMKG runs on a schedule and skips runs it already has, using <code>analysis_date</code>. BMKG does not publish past runs, so every run is archived from day one to score it.</p></div>
     <div class="panel stage-c"><span class="label">Bronze</span><h3>Short raw window</h3><span class="when2">Cropped to the Indonesia box</span><p>Retention caps vary by source. The storage chart shows the limits from the API.</p></div>
     <div class="panel stage-c"><span class="label">Silver</span><h3>Summaries per area</h3><span class="when2">PySpark for history · DuckDB live</span><p><code>cloud_kabkota</code> holds the coldest cloud top and cold-cloud share per area every 10 min. <code>rain_kabkota</code> holds mean, max cell and wet share per area per 30 min. <code>grid_cells</code> keeps 30 days of land cells. Optical flow on the Band 13 field moves today's cold cloud forward and stores the expected cold-cloud share per area at +1, +2 and +3 h. <code>gauge_hourly</code> turns GHCNh airport weather codes into rain yes/no, as an independent check on IMERG.</p></div>
-    <div class="panel stage-c"><span class="label">Gold</span><h3>Built for the app</h3><span class="when2">after each silver update</span><p><code>map_frames</code> has one row per area, slot and layer for the last 7 days, so the slider never waits. <code>features</code> is built when the model needs it and never written to disk.</p></div>
+    <div class="panel stage-c"><span class="label">Gold</span><h3>Built for the app</h3><span class="when2">after each silver update</span><p><code>map_frames</code> stores one row per area, slot and layer, with 31-day retention. <code>features</code> is built when the model needs it and never written to disk.</p></div>
     <div class="panel stage-c"><span class="label">Model</span><h3>Train weekly, score every slot</h3><span class="when2">LightGBM · +1, +2, +3 h</span><p>Spark builds the training rows and LightGBM trains on one node. It trains on IMERG Early history, the same product that arrives live, and retrains when NASA moves Early to V08. Fresh Himawari cloud tops and their motion cover the time before IMERG arrives. Predictions are stored before the truth exists, so the scoreboard is fair.</p></div>
     <div class="panel stage-c"><span class="label">Serve</span><h3>Map-first web app</h3><span class="when2">FastAPI + DuckDB · MapLibre GL JS</span><p>The API reads archived frames from Parquet. Cloud frames are served as small WebP images that the browser tints in the gruvbox palette.</p></div>
   </div>

@@ -115,8 +115,8 @@ def test_models_keeps_five_newest_folders(root):
 
 def test_mtime_and_independent_nested_policy(root):
     tiles = root / "gold/tiles/rain"
-    old = write(tiles / "old.png", mtime=NOW - timedelta(days=30))
-    recent = write(tiles / "recent.png", mtime=NOW - timedelta(days=29))
+    old = write(tiles / "old.png", mtime=NOW - timedelta(days=31))
+    recent = write(tiles / "recent.png", mtime=NOW - timedelta(days=30))
     dlq = write(root / "bronze/bmkg/_dlq/date=2025-11-29/records.jsonl.gz")
     dagster = write(root / "dagster_runs/old.db", mtime=NOW - timedelta(days=90))
 

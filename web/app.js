@@ -23,13 +23,15 @@ const settings = {
   zoom: store.get("zoom", "id"),
   cloud: store.get("cloud", 0.65),
   gauges: store.get("gauges", true),
+  lead: store.get("lead", 3),
+  replay: store.get("replay", 48),
 };
 const watch = new Set(store.get("watch", []));
 const views = ["map", "overview", "alerts", "model", "history", "pipeline", "settings"];
 const prefersLight = matchMedia("(prefers-color-scheme: light)");
 const halfHour = 30 * 60 * 1000;
-const frameCount = 103;
-const issueFrame = 96;
+const chartFrames = 48 * 2 + 1;
+let issueFrame = settings.replay * 2;
 const leads = [1, 2, 3];
 const blank = "—";
 const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -110,9 +112,9 @@ let areaById = new Map();
 let islands = [];
 let modelIssue;
 let timelineStart;
+let timelineEnd;
 let latestObs;
 let obsFrame;
-let ticks = [];
 let frame = issueFrame;
 let selected = null;
 let drawerDetailFailed = false;
@@ -132,10 +134,12 @@ let layer = "fc";
 let raw = false;
 let cloudsOn = true;
 let playing;
+let pendingFrames = 0;
+let paintedLayer;
+let paintedValues;
 let hovered;
 let hoverPoint;
 const areaDetails = new Map();
-const frameData = new Map();
 const frameStamps = new Map();
 const requests = new Map();
 const failedLabels = new Set();
@@ -196,22 +200,31 @@ function initMeta(data) {
   }
 
   setTimeline();
+  $("frame").value = frame;
+  updateWhen();
   $("play").disabled = false;
+}
+
+function timelineTicks(start, hours) {
+  const step = hours === 48 ? 24 : hours === 168 ? 48 : 5 * 48;
+  const wibSlot = (start / halfHour + 14) % 48;
+  const ticks = [];
+  for (let index = (48 - wibSlot) % Math.min(step, 48); index <= hours * 2; index += step) {
+    const time = start + index * halfHour;
+    ticks.push([index, clock(time) === "00:00" ? dayFormat.format(time) : "12:00"]);
+  }
+  return ticks;
 }
 
 function setTimeline() {
   modelIssue = meta.latest_issue_slot;
-  timelineStart = (modelIssue ? Date.parse(modelIssue) : Math.floor(Date.parse(meta.as_of) / halfHour) * halfHour)
-    - issueFrame * halfHour;
+  timelineEnd = modelIssue ? Date.parse(modelIssue) : Math.floor(Date.parse(meta.as_of) / halfHour) * halfHour;
+  issueFrame = settings.replay * 2;
+  timelineStart = timelineEnd - issueFrame * halfHour;
   latestObs = meta.latest_observed_slot;
   obsFrame = latestObs == null ? -1 : Math.min(issueFrame, Math.floor(archivedFrame(latestObs)));
-  ticks = Array.from({ length: frameCount }, (_, index) => {
-    const time = tms(index);
-    const hour = clock(time);
-    return hour === "00:00" ? [index, dayFormat.format(time)] : hour === "12:00" ? [index, hour] : null;
-  }).filter(Boolean);
+  $("frame").max = issueFrame;
   drawTrack();
-  updateWhen();
 }
 
 const archiveStamp = data => [
@@ -219,19 +232,29 @@ const archiveStamp = data => [
   data.frames_updated,
 ].join("|");
 
-// Frames are keyed by slot time, so older frames keep drawing until the newer archive arrives.
-async function loadFrames(...layers) {
+const frameKey = (name, hours) => name + ":" + hours;
+
+async function loadFrames(hours, ...layers) {
+  const end = timelineEnd;
   const stamp = archiveStamp(meta);
   const window = new URLSearchParams({
-    from: new Date(tms(0)).toISOString(), to: new Date(tms(frameCount - 1)).toISOString(),
+    from: new Date(end - hours * 2 * halfHour).toISOString(), to: new Date(end).toISOString(),
   });
   await Promise.all(layers.map(async name => {
-    if (frameStamps.get(name) === stamp) return;
+    const key = frameKey(name, hours);
+    const cached = frameStamps.get(key);
+    if (cached?.stamp === stamp && cached.end === end) return;
     const data = await read(`/api/frames?layer=${name}&${window}`, `${name} frames`);
-    if (!data) return;
-    frameData.set(name, new Map(data.slots.map((slot, index) => [Date.parse(slot), data.values[index]])));
-    frameStamps.set(name, stamp);
+    if (!data || stamp !== archiveStamp(meta) || end !== timelineEnd) return;
+    const rows = new Map(data.slots.map((slot, index) => [Date.parse(slot), data.values[index]]));
+    frameStamps.set(key, { stamp, end, rows });
   }));
+}
+
+function loadMapFrames() {
+  const layers = settings.replay === 48 ? ["prob1", "prob2", "prob3", "obs", "cold", "bmkg", "disagree"]
+    : [layerData[layer], ...(cloudsOn ? ["cold"] : [])];
+  return loadFrames(settings.replay, ...layers);
 }
 
 function useLatestProbabilities(ranking) {
@@ -243,23 +266,15 @@ function useLatestProbabilities(ranking) {
   }));
 }
 
-function forecastLead(index) {
-  return index <= issueFrame ? 3 : Math.ceil((index - issueFrame) / 2);
-}
-
 function forecastWindow(index, comparison = false) {
-  const start = tms(comparison ? index : Math.min(index, issueFrame));
-  const lead = comparison ? 3 : forecastLead(index);
+  const start = tms(index);
+  const lead = comparison ? 3 : settings.lead;
   return `${clock(start)}–${clockWib(start + lead * 2 * halfHour)}`;
 }
 
-function frameRow(name, index) {
-  if (name === "forecast") {
-    const lead = forecastLead(index);
-    const row = frameData.get("prob" + lead)?.get(tms(Math.min(index, issueFrame)));
-    return row ?? (index >= issueFrame ? latestProbabilities.get(lead) : null);
-  }
-  return frameData.get(name)?.get(tms(index));
+function frameRow(name, index, hours = settings.replay) {
+  const row = frameStamps.get(frameKey(name, hours))?.rows.get(tms(index));
+  return row ?? (index === issueFrame && name.startsWith("prob") ? latestProbabilities.get(Number(name.at(-1))) : null);
 }
 
 function valueAt(name, index, id) {
@@ -301,7 +316,7 @@ const legend = {
   bm: ["BMKG forecast", ["No rain", "Rain"]],
   ds: ["Model vs BMKG", ["Agree", "Disagree"]],
 };
-const layerData = { fc: "forecast", ob: "obs", bm: "bmkg", ds: "disagree" };
+const layerData = { get fc() { return "prob" + settings.lead; }, ob: "obs", bm: "bmkg", ds: "disagree" };
 const zoomBounds = {
   id: [[94.8, -11.2], [141.2, 6.2]], jawa: [[105.1, -8.9], [116.3, -5.7]],
   jatim: [[110.9, -8.9], [116.3, -6.6]],
@@ -324,6 +339,7 @@ function drawLegend() {
   const window = meta && (layer === "fc" || layer === "ds")
     ? `, ${forecastWindow(frame, layer === "ds")}` : "";
   $("legTitle").textContent = title + window;
+  $("forecastWindow").hidden = layer !== "fc";
   $("legend").innerHTML = [...keys, "No data"].map((label, index) =>
     `<div class="row"><span class="sw" style="background:${P()[layer][index] ?? P().nodata}"></span>${label}</div>`
   ).join("");
@@ -333,37 +349,30 @@ function drawLegend() {
 }
 
 function drawTrack() {
-  const pos = index => index / (frameCount - 1) * 100;
+  const pos = index => index / issueFrame * 100;
   const start = pos(Math.max(0, obsFrame));
-  const now = pos(issueFrame);
   $("deco").innerHTML = `
-    <div class="gap" style="left:${start}%;width:${now - start}%"></div>
-    <div class="fut" style="left:${now}%;right:0"></div>
+    <div class="gap" style="left:${start}%;right:0"></div>
     ${obsFrame >= 0 && obsFrame !== issueFrame ? `<div class="mk sat" style="left:${start}%"><span>IMERG</span></div>` : ""}
-    <div class="mk now" style="left:${now}%"><span>${modelIssue ? "issue" : "now"}</span></div>`;
-  $("ticks").innerHTML = ticks.map(([index, label]) => `<span style="left:${pos(index)}%">${label}</span>`).join("");
+    <div class="mk now"><span>latest</span></div>`;
+  $("ticks").innerHTML = timelineTicks(timelineStart, settings.replay)
+    .map(([index, label]) => `<span style="left:${pos(index)}%">${label}</span>`).join("");
 }
 
 function updateWhen() {
   if (!meta) return;
-  const minutesFromIssue = (frame - issueFrame) * 30;
-  const elapsed = Math.abs(minutesFromIssue);
-  const rel = minutesFromIssue === 0 ? (modelIssue ? "latest issue" : "now")
-    : (minutesFromIssue < 0 ? "−" : "+") + (elapsed >= 60 ? `${Math.floor(elapsed / 60)} h` : "")
+  const elapsed = (issueFrame - frame) * 30;
+  const rel = elapsed === 0 ? (modelIssue ? "latest issue" : "now")
+    : "−" + (elapsed >= 60 ? `${Math.floor(elapsed / 60)} h` : "")
       + (elapsed % 60 ? ` ${elapsed % 60} min` : "");
   $("frame").setAttribute("aria-valuetext", fmtTime(tms(frame)));
   $("wT").textContent = fmtTime(tms(frame));
-  const forecastOnly = frame > issueFrame;
   const observationPending = latestObs == null || tms(frame) > Date.parse(latestObs);
-  const status = forecastOnly ? "forecast only" : observationPending ? "IMERG pending" : "archive";
-  $("wS").textContent = rel + " · " + status;
-  let banner = "";
-  if (layer === "ob" && observationPending) {
-    banner = latestObs == null ? "No IMERG observations are archived."
-      : `IMERG is available through ${fmtTime(latestObs)}.`;
-  } else if (cloudsOn && forecastOnly) {
-    banner = modelIssue ? `Forecast only. Issued ${fmtTime(modelIssue)}.` : "No model issue is archived.";
-  }
+  $("wS").textContent = rel + " · " + (observationPending ? "IMERG pending" : "archive");
+  const banner = layer === "ob" && observationPending
+    ? latestObs == null ? "No IMERG observations are archived."
+      : `IMERG is available through ${fmtTime(latestObs)}.`
+    : "";
   $("banner").textContent = banner;
   $("banner").hidden = !banner;
   const row = frameRow(layerData[layer], frame);
@@ -399,7 +408,9 @@ const stemTime = scan => Date.parse(scan.replace(/(\d{4})(\d\d)(\d\d)T(\d\d)(\d\
 // The latest image at or before the frame, up to 2 h old, so a short gap keeps the last picture.
 function tileFor(name, index) {
   if (name === "rain" && (latestObs == null || tms(index) > Date.parse(latestObs))) return null;
-  return meta.tile_times[name].findLast(time => time <= stem(index) && time > stem(index - 4));
+  const end = stem(index);
+  const scan = meta.tile_times[name].findLast(time => time <= end);
+  return scan > stem(index - 4) ? scan : null;
 }
 
 function tileBlob(name, scan) {
@@ -433,7 +444,7 @@ async function drawRaster(name, visible) {
     map.setLayoutProperty(name, "visibility", "none");
     return;
   }
-  const next = playing && tileFor(name, frame + 1);
+  const next = playing && frame < issueFrame && tileFor(name, frame + 1);
   if (next) tileBlob(name, next);
   const appearance = name === "rain" ? P().ob : P().cloud;
   const key = [scan, appearance, name === "cloud" ? settings.cloud : ""].join(":");
@@ -484,36 +495,48 @@ async function drawRaster(name, visible) {
   map.once("render", () => source.pause());
 }
 
-function paint() {
+function paint(updateStyle = true) {
   drawLegend();
   if (!mapReady) return;
-  const p = P();
   const showRaw = raw && layer === "ob";
-  const expression = ["match", ["coalesce", ["feature-state", "k"], -1]];
-  p[layer].forEach((color, index) => expression.push(index, color));
-  expression.push(p.nodata);
-  map.setPaintProperty("bg", "background-color", p.sea);
-  map.setPaintProperty("nb", "fill-color", p.land);
-  map.setPaintProperty("kab-fill", "fill-color", expression);
-  map.setPaintProperty("kab-fill", "fill-opacity", showRaw ? 0 : 1);
-  map.setPaintProperty("kab-line", "line-color", showRaw ? p.fg : p.edge);
-  map.setPaintProperty("kab-line", "line-opacity", showRaw ? 0.35 : 1);
-  map.setPaintProperty("kab-sel", "line-color", p.sel);
-  map.setPaintProperty("kab-hover", "line-color", p.hover);
-  map.setPaintProperty("gauges", "circle-stroke-color", p.fg);
-  map.setLayoutProperty("gauges", "visibility", settings.gauges ? "visible" : "none");
-  return Promise.all([drawRaster("rain", showRaw), drawRaster("cloud", cloudsOn && frame <= issueFrame)]);
+  if (updateStyle) {
+    const p = P();
+    const expression = ["match", ["coalesce", ["feature-state", "k"], -1]];
+    p[layer].forEach((color, index) => expression.push(index, color));
+    expression.push(p.nodata);
+    map.setPaintProperty("bg", "background-color", p.sea);
+    map.setPaintProperty("nb", "fill-color", p.land);
+    map.setPaintProperty("kab-fill", "fill-color", expression);
+    map.setPaintProperty("kab-fill", "fill-opacity", showRaw ? 0 : 1);
+    map.setPaintProperty("kab-line", "line-color", showRaw ? p.fg : p.edge);
+    map.setPaintProperty("kab-line", "line-opacity", showRaw ? 0.35 : 1);
+    map.setPaintProperty("kab-sel", "line-color", p.sel);
+    map.setPaintProperty("kab-hover", "line-color", p.hover);
+    map.setPaintProperty("gauges", "circle-stroke-color", p.fg);
+    map.setLayoutProperty("gauges", "visibility", settings.gauges ? "visible" : "none");
+  }
+  return Promise.all([drawRaster("rain", showRaw), drawRaster("cloud", cloudsOn)]);
 }
 
-function applyFrame() {
+async function applyFrame(playbackStep = false) {
   const values = frameRow(layerData[layer], frame);
+  const layerChanged = layer !== paintedLayer;
   if (mapReady) {
-    for (const id of mapAreaIds) map.setFeatureState({ source: "kab", id }, { k: colorClass(values?.[id]) });
+    if (layerChanged || values !== paintedValues) {
+      for (const id of mapAreaIds) map.setFeatureState({ source: "kab", id }, { k: colorClass(values?.[id]) });
+      paintedLayer = layer;
+      paintedValues = values;
+    }
     if (hovered != null) showTip(hovered, hoverPoint);
   }
   updateWhen();
-  drawDrawer();
-  return paint();
+  drawDrawer(playbackStep);
+  pendingFrames++;
+  try {
+    await paint(layerChanged);
+  } finally {
+    pendingFrames--;
+  }
 }
 
 let mapAreaIds = [];
@@ -725,28 +748,28 @@ async function openDrawer(id, zoom, opener) {
   }
 }
 
-function drawDrawer() {
+function drawDrawer(playbackStep = false) {
   if (selected == null) return;
   const area = mapAreas.get(selected);
   const data = areaDetails.get(selected);
   const cloud = new Map();
   for (const row of data?.cloud ?? []) {
     const index = Math.ceil(archivedFrame(row.slot));
-    if (index >= 0 && index <= issueFrame) cloud.set(index, row);
+    cloud.set(index, row);
   }
   const rain = new Map((data?.observed ?? []).map(row => [archivedFrame(row.slot), row.rain_mean_x10]));
   const bmkgSlots = new Map((data?.bmkg ?? []).map(row => [archivedFrame(row.slot), row]));
   const bmkg = bmkgSlots.get(frame);
-  const predicted = (data?.predictions ?? []).filter(row => row.lead_h === 3);
-  const prob = new Map(predicted.map(row => [archivedFrame(row.slot), row.prob_pct]));
-  const obs = index => index <= issueFrame ? rain.get(index) ?? valueAt("obs", index, selected) : null;
-  const forecast = index => valueAt("forecast", index, selected) ?? (index <= issueFrame ? prob.get(index) : null);
-  const model = forecast(frame);
+  const predictions = new Map((data?.predictions ?? []).map(row => [row.lead_h + ":" + archivedFrame(row.slot), row.prob_pct]));
+  const areaValue = (name, index) => valueAt(name, index, selected) ?? frameRow(name, index, 48)?.[selected];
+  const obs = index => rain.get(index) ?? areaValue("obs", index);
+  const forecast = (index, lead) => areaValue("prob" + lead, index) ?? predictions.get(lead + ":" + index);
+  const model = forecast(frame, settings.lead);
   const modelLabel = `Our model, rain <span style="white-space:nowrap">${forecastWindow(frame)}</span>`;
   const measured = obs(frame);
-  const bm = valueAt("bmkg", frame, selected);
+  const bm = areaValue("bmkg", frame);
   const cloudRow = cloud.get(frame);
-  const cold = cloudRow?.cold_pct ?? valueAt("cold", frame, selected);
+  const cold = cloudRow?.cold_pct ?? areaValue("cold", frame);
   $("dName").textContent = area.label;
   $("dIsland").textContent = area.island ?? "kab/kota";
   $("dNow").innerHTML = [
@@ -754,57 +777,62 @@ function drawDrawer() {
     ["BMKG", bmkg?.weather != null ? bmkgText(bmkg) : bm == null ? blank : bm ? "Rain" : "No rain", "var(--orange)"],
     ["Coldest cloud top", temp(cloudRow?.tb_min), "var(--fg0)"],
     ["IMERG rain", measured != null ? `${(measured / 10).toFixed(1)} mm/h`
-      : frame <= issueFrame && frame > obsFrame ? "not in yet" : blank, "var(--fg0)"],
+      : frame > obsFrame ? "not in yet" : blank, "var(--fg0)"],
   ].map(([label, value, color]) => `<div><span class="l">${label}</span><span class="v" style="color:${color}">${value}</span></div>`).join("");
 
   const svg = $("dChart");
-  svg.replaceChildren();
-  const indices = Array.from({ length: frameCount }, (_, index) => index);
-  const x = index => 32 + index * 302 / (frameCount - 1);
-  const cloudY = value => 8 + (20 - Math.max(-90, Math.min(20, value))) / 110 * 30;
-  const rainTop = Math.max(2, Math.ceil(Math.max(...indices.map(index => (obs(index) ?? 0) / 10))));
-  const pY = value => 106 + (1 - value / 100) * 56;
-  for (const [y, text] of [[16, "20"], [38, "−90"], [54, rainTop], [93, "0"], [176, "BMKG"]]) {
-    svg.append(svgEl("text", { x: 28, y, "text-anchor": "end" }, text));
-  }
-  for (const [y, label] of [[15, "cloud top °C"], [53, "IMERG mm/h"], [115, "our P(rain)"]]) {
-    svg.append(svgEl("text", { x: 34, y }, label));
-  }
-  svg.append(svgEl("line", { x1: 32, x2: 334, y1: 94, y2: 94, stroke: "var(--line)" }));
-  for (const value of [0, 50, 100]) {
-    svg.append(svgEl("line", { x1: 32, x2: 334, y1: pY(value), y2: pY(value),
-      stroke: "var(--line)", "stroke-dasharray": value === 50 ? "2 3" : "0" }),
-    svgEl("text", { x: 28, y: pY(value) + 3.5, "text-anchor": "end" }, percent(value)));
-  }
-  traces(svg, [{ values: indices.map(index => {
-    const tb = cloud.get(index)?.tb_min;
-    return tb == null ? null : tb - 273.15;
-  }), color: "var(--fg)", width: 1.3 }], x, cloudY);
-  traces(svg, [
-    { values: indices.map(index => index <= issueFrame ? forecast(index) : null), color: "var(--blue)" },
-    { values: indices.map(index => index >= issueFrame ? forecast(index) : null), color: "var(--blue)", dash: "3 2" },
-  ], x, pY);
-  for (const index of indices) {
-    const value = obs(index) / 10;
-    if (value > 0) {
-      const height = Math.max(1, value / rainTop * 40);
-      svg.append(svgEl("rect", { x: x(index) - 1, y: 94 - height, width: 2.2, height, fill: P().ob[rainClass(value)] }));
+  const first = issueFrame - chartFrames + 1;
+  const x = index => 32 + (index - first) * 302 / (chartFrames - 1);
+  if (!playbackStep) {
+    svg.replaceChildren();
+    const indices = Array.from({ length: chartFrames }, (_, index) => first + index);
+    const cloudY = value => 8 + (20 - Math.max(-90, Math.min(20, value))) / 110 * 30;
+    const rainTop = Math.max(2, Math.ceil(Math.max(...indices.map(index => (obs(index) ?? 0) / 10))));
+    const pY = value => 106 + (1 - value / 100) * 56;
+    for (const [y, text] of [[16, "20"], [38, "−90"], [54, rainTop], [93, "0"], [176, "BMKG"]]) {
+      svg.append(svgEl("text", { x: 28, y, "text-anchor": "end" }, text));
     }
-    const archived = valueAt("bmkg", index, selected);
-    const areaRain = bmkgSlots.get(index)?.rain;
-    const wet = archived ?? (areaRain == null ? null : Number(areaRain));
-    if (wet != null) svg.append(svgEl("rect", { x: x(index) - 1.4, y: 172, width: 2.9, height: 11, fill: P().bm[Number(wet > 0)] }));
+    for (const [y, label] of [[15, "cloud top °C"], [53, "IMERG mm/h"], [115, "our P(rain)"]]) {
+      svg.append(svgEl("text", { x: 34, y }, label));
+    }
+    svg.append(svgEl("line", { x1: 32, x2: 334, y1: 94, y2: 94, stroke: "var(--line)" }));
+    for (const value of [0, 50, 100]) {
+      svg.append(svgEl("line", { x1: 32, x2: 334, y1: pY(value), y2: pY(value),
+        stroke: "var(--line)", "stroke-dasharray": value === 50 ? "2 3" : "0" }),
+      svgEl("text", { x: 28, y: pY(value) + 3.5, "text-anchor": "end" }, percent(value)));
+    }
+    traces(svg, [{ values: indices.map(index => {
+      const tb = cloud.get(index)?.tb_min;
+      return tb == null ? null : tb - 273.15;
+    }), color: "var(--fg)", width: 1.3 }], index => x(first + index), cloudY);
+    traces(svg, [{ values: indices.map(index => forecast(index, 3)), color: "var(--blue)" }], index => x(first + index), pY);
+    for (const index of indices) {
+      const value = obs(index) / 10;
+      if (value > 0) {
+        const height = Math.max(1, value / rainTop * 40);
+        svg.append(svgEl("rect", { x: x(index) - 1, y: 94 - height, width: 2.2, height, fill: P().ob[rainClass(value)] }));
+      }
+      const archived = areaValue("bmkg", index);
+      const areaRain = bmkgSlots.get(index)?.rain;
+      const wet = archived ?? (areaRain == null ? null : Number(areaRain));
+      if (wet != null) svg.append(svgEl("rect", { x: x(index) - 1.4, y: 172, width: 2.9, height: 11, fill: P().bm[Number(wet > 0)] }));
+    }
+    for (const [index, color, dash] of [
+      [obsFrame, "var(--muted)", "3 3"], [issueFrame, "var(--fg0)", "0"],
+    ]) {
+      if (index >= first) svg.append(svgEl("line", { x1: x(index), x2: x(index), y1: 5, y2: 187,
+        stroke: color, "stroke-dasharray": dash }));
+    }
+    for (const index of [first, first + 24, first + 48, first + 72, issueFrame]) {
+      svg.append(svgEl("text", { x: x(index), y: 207, "text-anchor": index === issueFrame ? "end" : "middle" },
+        index === issueFrame ? "issue" : `−${(issueFrame - index) / 2}h`));
+    }
+    svg.append(svgEl("line", { id: "dCursor", y1: 5, y2: 187, stroke: "var(--yellow)", "stroke-width": 2 }));
   }
-  for (const [index, color, dash] of [
-    [obsFrame, "var(--muted)", "3 3"], [issueFrame, "var(--fg0)", "0"], [frame, "var(--yellow)", "0"],
-  ]) {
-    if (index >= 0) svg.append(svgEl("line", { x1: x(index), x2: x(index), y1: 5, y2: 187,
-      stroke: color, "stroke-dasharray": dash, "stroke-width": color === "var(--yellow)" ? 2 : 1 }));
-  }
-  for (const index of [0, 24, 48, 72, issueFrame]) {
-    svg.append(svgEl("text", { x: x(index), y: 207, "text-anchor": "middle" },
-      index === issueFrame ? "issue" : `−${(issueFrame - index) / 2}h`));
-  }
+  const cursor = $("dCursor");
+  cursor.setAttribute("visibility", frame < first ? "hidden" : "visible");
+  cursor.setAttribute("x1", x(frame));
+  cursor.setAttribute("x2", x(frame));
 
   const score = data?.scores.rows.findLast(row => row.source === "model" && row.lead_h === 3);
   const month = new Date(tms(frame) + ({ WIB: 7, WITA: 8, WIT: 9 }[area.tz] ?? 0) * 2 * halfHour);
@@ -868,10 +896,11 @@ function renderOverview(ranking) {
     $("ovTop").innerHTML = emptyRow(5, "Forecast ranking unavailable.");
     return;
   }
-  const obs = frameRow("obs", obsFrame);
-  const coldTime = [...(frameData.get("cold")?.keys() ?? [])].findLast(time => time <= tms(issueFrame));
-  const cold = frameData.get("cold")?.get(coldTime);
-  const forecast = frameRow("forecast", issueFrame);
+  const obs = frameRow("obs", obsFrame, 48);
+  const coldRows = frameStamps.get(frameKey("cold", 48))?.rows;
+  const coldTime = [...(coldRows?.keys() ?? [])].findLast(time => time <= timelineEnd);
+  const cold = coldRows?.get(coldTime);
+  const forecast = frameRow("prob3", issueFrame, 48);
   const tally = (values, limit) => values?.some(value => value != null)
     ? count(values.filter(value => value != null && value >= limit).length) : blank;
   const alertCounts = [1, 2, 3].map(rank => alertData?.alerts.filter(row => row.rank === rank).length);
@@ -882,23 +911,25 @@ function renderOverview(ranking) {
     ["Alerts", count(alertData?.alerts.length), alertData ? `${alertCounts[2]} Awas · ${alertCounts[1]} Siaga · ${alertCounts[0]} Waspada` : "Alert data unavailable", "red"],
     [`Raining${obsFrame >= 0 ? " at " + clock(tms(obsFrame)) : ""}`, tally(obs, 5), "IMERG, the latest slot in", "green"],
   ]);
-  const indices = Array.from({ length: frameCount }, (_, index) => index);
+  const first = issueFrame - chartFrames + 1;
+  const indices = Array.from({ length: chartFrames }, (_, index) => first + index);
   const series = [
-    { values: indices.map(index => getShare(frameRow("forecast", index), value => value / 100)), color: "var(--blue)", dash: "4 3" },
-    { values: indices.map(index => getShare(frameRow("cold", index), value => value >= 25)), color: "var(--fg)", width: 1.5 },
-    { values: indices.map(index => getShare(frameRow("obs", index), value => value >= 5)), color: "var(--aqua)", width: 2.2 },
+    { values: indices.map(index => getShare(frameRow("prob3", index, 48), value => value / 100)), color: "var(--blue)" },
+    { values: indices.map(index => getShare(frameRow("cold", index, 48), value => value >= 25)), color: "var(--fg)", width: 1.5 },
+    { values: indices.map(index => getShare(frameRow("obs", index, 48), value => value >= 5)), color: "var(--aqua)", width: 2.2 },
   ];
   const stamp = archiveStamp(meta);
-  const shareFailed = ["prob1", "prob2", "prob3", "obs", "cold"].some(name => frameStamps.get(name) !== stamp);
+  const shareFailed = ["prob3", "obs", "cold"].some(name => frameStamps.get(frameKey(name, 48))?.stamp !== stamp);
   const shareValues = series.flatMap(line => line.values);
   if (shareFailed && shareValues.every(value => value == null)) {
     chartNote(share, "Rain share unavailable.");
   } else {
     const hi = Math.max(0.3, Math.ceil(Math.max(...shareValues) * 10) / 10);
+    const ticks = timelineTicks(tms(first), 48);
     lineChart(share, shareWidth, 230, series, {
-      n: frameCount, hi, yt: Array.from({ length: Math.round(hi * 10) + 1 }, (_, i) => i / 10), format: pct,
+      n: chartFrames, hi, yt: Array.from({ length: Math.round(hi * 10) + 1 }, (_, i) => i / 10), format: pct,
       xt: shareWidth < 500 ? ticks.filter(([, label]) => label !== "12:00") : ticks,
-      marks: [[obsFrame, "IMERG"], [issueFrame, "issue"]].filter(([index]) => index >= 0),
+      marks: [[obsFrame - first, "IMERG"], [chartFrames - 1, "issue"]].filter(([index]) => index >= 0),
     });
   }
   const rows = islands.map(island => ({
@@ -907,7 +938,7 @@ function renderOverview(ranking) {
   }));
   if (rows.some(row => row.values[0][0] != null)) {
     barsH(island, islandWidth, 230, rows, { max: Math.max(0.2, ...rows.map(row => row.values[0][0])), format: pct });
-  } else chartNote(island, !ranking && frameStamps.get("prob3") !== stamp
+  } else chartNote(island, !ranking && frameStamps.get(frameKey("prob3", 48))?.stamp !== stamp
     ? "Island forecasts unavailable." : "No island forecasts archived.");
   const top = (ranking?.alerts ?? []).filter(row => row.prob_pct[3] != null)
     .sort((a, b) => b.prob_pct[3] - a.prob_pct[3]).slice(0, 10);
@@ -1242,7 +1273,7 @@ async function renderView(current) {
     renderMapStatus();
     const [pipeline, scores, ranking] = await Promise.all([
       read("/api/pipeline", "Pipeline statistics"), read("/api/scores?scope=national&lead=3", "National scores"),
-      read(alertUrl(0), "Forecast ranking"), loadFrames("prob1", "prob2", "prob3", "obs", "cold", "bmkg", "disagree"),
+      read(alertUrl(0), "Forecast ranking"), loadMapFrames(),
       mapSetup ??= initMap(),
     ]);
     if (view !== current) return;
@@ -1259,7 +1290,7 @@ async function renderView(current) {
     ]);
   } else if (current === "overview") {
     const [ranking] = await Promise.all([
-      read(alertUrl(0), "Forecast ranking"), loadFrames("prob1", "prob2", "prob3", "obs", "cold"), initialAlerts,
+      read(alertUrl(0), "Forecast ranking"), loadFrames(48, "prob1", "prob2", "prob3", "obs", "cold"), initialAlerts,
     ]);
     if (view === current) {
       useLatestProbabilities(ranking);
@@ -1290,14 +1321,12 @@ async function refreshMeta() {
   renderMapStatus();
   if (view === "overview") renderFreshness();
   if (!changed) return false;
-  const atIssue = frame === issueFrame;
-  const shown = tms(frame);
   areaDetails.clear();
+  latestProbabilities.clear();
   for (const url of requests.keys()) {
     if (url.startsWith("/api/areas/")) requests.delete(url);
   }
-  setTimeline();
-  setFrame(atIssue ? issueFrame : Math.max(0, Math.min(frameCount - 1, Math.round((shown - tms(0)) / halfHour))));
+  resetTimeline();
   if (selected != null) openDrawer(selected, false);
   return true;
 }
@@ -1346,10 +1375,23 @@ function stop() {
   $("play").setAttribute("aria-label", "Play");
 }
 
-function setFrame(index) {
+function setFrame(index, playbackStep = false) {
   frame = index;
   $("frame").value = frame;
-  applyFrame();
+  return applyFrame(playbackStep);
+}
+
+function resetTimeline() {
+  const atIssue = frame === issueFrame;
+  const shown = tms(frame);
+  setTimeline();
+  return setFrame(atIssue ? issueFrame : Math.max(0, Math.min(issueFrame, Math.round((shown - timelineStart) / halfHour))));
+}
+
+async function updateMapFrames() {
+  if (!meta) return;
+  await loadMapFrames();
+  if (view === "map") await applyFrame();
 }
 
 document.addEventListener("click", event => {
@@ -1375,6 +1417,7 @@ document.querySelectorAll("#layers input").forEach(input => input.addEventListen
   $("raw").disabled = layer !== "ob";
   $("rawWrap").classList.toggle("disabled", layer !== "ob");
   setFrame(layer === "ob" && obsFrame >= 0 ? Math.min(frame, obsFrame) : frame);
+  updateMapFrames();
 }));
 document.querySelector("#layers label").classList.add("on");
 document.querySelectorAll("[data-z]").forEach(button =>
@@ -1385,8 +1428,29 @@ $("raw").addEventListener("change", event => {
 });
 $("cloudsOn").addEventListener("change", event => {
   cloudsOn = event.target.checked;
-  paint();
-  updateWhen();
+  applyFrame();
+  if (cloudsOn) updateMapFrames();
+});
+$("replay").value = settings.replay;
+$("replay").addEventListener("change", event => {
+  stop();
+  settings.replay = Number(event.target.value);
+  store.set("replay", settings.replay);
+  if (!meta) {
+    frame = issueFrame = settings.replay * 2;
+    return;
+  }
+  resetTimeline();
+  updateMapFrames();
+});
+document.querySelectorAll('input[name="lead"]').forEach(input => {
+  input.checked = Number(input.value) === settings.lead;
+  input.addEventListener("change", () => {
+    settings.lead = Number(input.value);
+    store.set("lead", settings.lead);
+    applyFrame();
+    updateMapFrames();
+  });
 });
 $("frame").addEventListener("input", event => setFrame(Number(event.target.value)));
 $("play").addEventListener("click", () => {
@@ -1395,14 +1459,15 @@ $("play").addEventListener("click", () => {
     stop();
     return;
   }
-  const end = () => layer === "ob" && obsFrame >= 0 ? obsFrame : frameCount - 1;
+  const end = () => layer === "ob" && obsFrame >= 0 ? obsFrame : issueFrame;
   if (frame >= end()) setFrame(0);
   $("play").textContent = "❚❚";
   $("play").setAttribute("aria-label", "Pause");
   playing = setInterval(() => {
+    if (pendingFrames) return;
     if (frame >= end()) stop();
-    else setFrame(frame + 1);
-  }, 260);
+    else setFrame(frame + 1, true);
+  }, { 48: 260, 168: 90, 720: 32 }[settings.replay]);
 });
 $("dataRetry").addEventListener("click", async () => {
   $("dataRetry").disabled = true;

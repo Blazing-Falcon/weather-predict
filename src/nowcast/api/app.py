@@ -63,8 +63,8 @@ def frames(
     if first.utcoffset() is None or last.utcoffset() is None:
         raise HTTPException(422, "Use timestamps with a UTC offset.")
     first, last = first.astimezone(UTC), last.astimezone(UTC)
-    if not timedelta(0) <= last - first <= timedelta(days=7):
-        raise HTTPException(422, "The frame window must be in order and span at most seven days.")
+    if not timedelta(0) <= last - first <= timedelta(days=31):
+        raise HTTPException(422, "The frame window must be in order and span at most 31 days.")
     cache = STATIC_CACHE if last < now - timedelta(hours=6) else LIVE_CACHE
     return JSONResponse(data.frames(layer, first, last), headers={"Cache-Control": cache})
 

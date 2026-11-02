@@ -25,6 +25,7 @@ const settings = {
   gauges: store.get("gauges", true),
   lead: store.get("lead", 3),
   replay: store.get("replay", 48),
+  alertSource: store.get("alertSource", "model"),
 };
 const watch = new Set(store.get("watch", []));
 const views = ["map", "overview", "alerts", "model", "history", "pipeline", "settings"];
@@ -50,6 +51,7 @@ const dayFormat = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "sho
 const fmtTime = value => dateFormat.format(new Date(value)).replace(",", "") + " WIB";
 const clock = value => clockFormat.format(new Date(value));
 const clockWib = value => value == null ? blank : clock(value) + " WIB";
+const dayClockWib = value => `${dayFormat.format(new Date(value))} ${clockWib(value)}`;
 const pct = value => value == null ? blank : Math.round(value * 100) + "%";
 const percent = value => value == null ? blank : Math.round(value) + "%";
 const decimal = (value, digits = 2) => value == null ? blank : value.toFixed(digits);
@@ -124,6 +126,8 @@ let historyB = null;
 let historySelection = 0;
 let alertLoad = 0;
 let alertData;
+let bmkgAlertData;
+let bmkgAlertsRequest;
 let latestProbabilities = new Map();
 let route = 0;
 let map;
@@ -254,6 +258,7 @@ async function loadFrames(hours, ...layers) {
 function loadMapFrames() {
   const layers = settings.replay === 48 ? ["prob1", "prob2", "prob3", "obs", "cold", "bmkg", "disagree"]
     : [layerData[layer], ...(cloudsOn ? ["cold"] : [])];
+  if (layer === "bm") layers.push("bmkg_code", "bmkg_step", "bmkg_age");
   return loadFrames(settings.replay, ...layers);
 }
 
@@ -545,9 +550,23 @@ let mapAreas = new Map();
 function showTip(id, point) {
   const area = mapAreas.get(id);
   const value = valueAt(layerData[layer], frame, id);
-  const description = value == null ? "No data for this time" : layer === "fc"
+  let description = value == null ? "No data for this time" : layer === "fc"
     ? `${percent(value)} chance of rain ${forecastWindow(frame)}` : layer === "ob"
       ? `${(value / 10).toFixed(1)} mm/h` : legend[layer][1][colorClass(value)];
+  if (layer === "bm") {
+    const code = valueAt("bmkg_code", frame, id);
+    const step = valueAt("bmkg_step", frame, id);
+    const age = valueAt("bmkg_age", frame, id);
+    description = "No data for this time";
+    if (value != null && code != null && step != null && age != null) {
+      const slot = tms(frame);
+      const start = slot - step * 60000;
+      const hour = 2 * halfHour;
+      const run = Math.floor((slot - age * hour) / hour) * hour;
+      const names = bmkgNames[code]?.join(" · ") ?? `BMKG code ${code}`;
+      description = `${names}<br>BMKG ${clock(start)}–${clockWib(start + 3 * hour)}, run ${dayClockWib(run)}`;
+    }
+  }
   const cold = valueAt("cold", frame, id);
   const tip = $("tip");
   tip.innerHTML = `<b>${escape(area.label)}</b><br>${description}${cloudsOn && cold != null ? `<br><span class="note">Cold cloud ${percent(cold)}</span>` : ""}`;
@@ -954,15 +973,28 @@ const alertSortHeaders = document.querySelectorAll("[data-alert-sort]");
 const alertLabel = row => areaById.get(row.area_id)?.label ?? row.name;
 
 function renderAlerts() {
+  const bmkg = settings.alertSource === "bmkg";
+  const data = bmkg ? bmkgAlertData : alertData;
+  const category = bmkg ? "Category" : "Level";
+  $("alLvl").hidden = bmkg;
+  $("alModelIntro").hidden = bmkg;
+  $("alBmkgIntro").hidden = !bmkg;
+  $("alBmkgRun").textContent = data?.bmkg_analysis_time == null ? "" : ` BMKG run ${dayClockWib(data.bmkg_analysis_time)}.`;
+  $("alRank").textContent = category;
+  $("alBmkgNow").textContent = bmkg ? "BMKG now" : "BMKG";
+  $("alRankDesc").textContent = `${category}: high to low`;
+  $("alRankAsc").textContent = `${category}: low to high`;
+  $("alBody").classList.toggle("bmkg-alerts", bmkg);
   const [key, direction] = (alertSort.value || "rank-descending").split("-");
   for (const button of alertSortHeaders) {
     if (button.dataset.alertSort === key) button.parentElement.setAttribute("aria-sort", direction);
     else button.parentElement.removeAttribute("aria-sort");
   }
-  if (!alertData) {
-    $("alCount").textContent = "Alerts unavailable";
+  if (!data) {
+    const message = data === undefined ? "Loading alerts…" : "Alerts unavailable";
+    $("alCount").textContent = message;
     $("alTime").textContent = "";
-    $("alBody").innerHTML = emptyRow(11, "Alerts unavailable");
+    $("alBody").innerHTML = emptyRow(11, message);
     return;
   }
   const q = $("alQ").value.trim().toLowerCase();
@@ -970,14 +1002,14 @@ function renderAlerts() {
   const province = $("alProvince").value;
   const minimum = Number($("alLvl").value);
   const onlyWatch = $("alWatch").checked;
-  const rows = alertData.alerts.filter(row => {
+  const rows = data.alerts.filter(row => {
     const label = alertLabel(row);
-    return row.rank >= minimum && (!island || row.island === island) && (!province || row.province_code === province)
+    return (bmkg || row.rank >= minimum) && (!island || row.island === island) && (!province || row.province_code === province)
       && (!q || label.toLowerCase().includes(q)) && (!onlyWatch || watch.has(row.area_id));
   });
   if (alertSort.value) {
     const value = row => key === "name" ? alertLabel(row)
-      : key === "rank" ? row.rank : key === "cloud" ? row.tb_min : row.prob_pct[key];
+      : key === "rank" ? (bmkg ? row.bmkg_3h.weather : row.rank) : key === "cloud" ? row.tb_min : row.prob_pct[key];
     const sign = direction === "ascending" ? 1 : -1;
     rows.sort((a, b) => {
       const left = value(a), right = value(b);
@@ -986,16 +1018,17 @@ function renderAlerts() {
     });
   }
   $("alCount").textContent = count(rows.length) + (rows.length === 1 ? " area" : " areas");
-  $("alTime").textContent = alertData.issue_slot ? `Issued ${fmtTime(alertData.issue_slot)}` : "No alert issue available";
+  $("alTime").textContent = data.issue_slot ? `Issued ${fmtTime(data.issue_slot)}` : "No alert issue available";
   $("alBody").innerHTML = rows.map(row => {
     const label = escape(alertLabel(row));
+    const chip = bmkg ? bmkgText(row.bmkg_3h, "chip") : `<span class="lvl ${row.level.toLowerCase()}">${row.level}</span>`;
     return `<tr class="al-row"><td><button class="star" data-star="${row.area_id}" aria-pressed="${watch.has(row.area_id)}" aria-label="Watch ${label}">★</button></td>
-      <td><span class="lvl ${row.level.toLowerCase()}">${row.level}</span></td><td class="al-name">${label}</td><td class="note al-detail">${escape(row.island)}</td>
+      <td>${chip}</td><td class="al-name">${label}</td><td class="note al-detail">${escape(row.island)}</td>
       ${leads.map(lead => `<td class="num al-detail" data-lead="+${lead} h">${percent(row.prob_pct[lead])}</td>`).join("")}
-      <td class="num al-detail al-cloud">${temp(row.tb_min)}</td><td class="num al-cold">${percent(row.cold_pct)}</td>
+      <td class="num al-detail al-cloud">${temp(row.tb_min)}</td><td class="num al-detail al-cold">${percent(row.cold_pct)}</td>
       <td class="al-detail al-bmkg">${bmkgText(row.bmkg, "chip")}</td><td class="al-map"><button class="linkbtn" data-open="${row.area_id}">map</button></td></tr>`;
-  }).join("") || emptyRow(11, !alertData.issue_slot ? "No forecast issue archived."
-    : "No areas match. Lower the level or clear the search.");
+  }).join("") || emptyRow(11, !data.issue_slot ? "No forecast issue archived."
+    : bmkg ? "No areas match." : "No areas match. Lower the level or clear the search.");
 }
 
 async function loadAlerts() {
@@ -1005,6 +1038,14 @@ async function loadAlerts() {
   alertData = data;
   $("alertN").textContent = data?.issue_slot ? count(data.alerts.length) : "";
   document.querySelector("[data-view][aria-current=page]").scrollIntoView({ block: "nearest", inline: "nearest" });
+  if (view === "alerts") renderAlerts();
+}
+
+async function loadBmkgAlerts() {
+  const request = bmkgAlertsRequest = read("/api/alerts?source=bmkg", "BMKG alerts");
+  const data = await request;
+  if (request !== bmkgAlertsRequest) return;
+  bmkgAlertData = data;
   if (view === "alerts") renderAlerts();
 }
 
@@ -1259,7 +1300,7 @@ async function renderView(current) {
   await metaRequest;
   if (view !== current) return;
   if (current === "alerts") {
-    await initialAlerts;
+    await (settings.alertSource === "bmkg" ? loadBmkgAlerts() : initialAlerts);
     renderAlerts();
   } else if (current === "model") {
     renderModel(await read("/api/model", "Model results"));
@@ -1525,6 +1566,16 @@ $("dHist").addEventListener("click", () => {
 for (const id of ["alQ", "alIsland", "alProvince", "alLvl", "alWatch"]) {
   $(id).addEventListener("input", renderAlerts);
 }
+for (const input of document.querySelectorAll('input[name="alertSource"]')) {
+  input.checked = input.value === settings.alertSource;
+  input.addEventListener("change", () => {
+    settings.alertSource = input.value;
+    store.set("alertSource", settings.alertSource);
+    renderAlerts();
+    if (settings.alertSource === "bmkg") loadBmkgAlerts();
+  });
+}
+renderAlerts();
 alertSort.addEventListener("change", renderAlerts);
 for (const button of alertSortHeaders) {
   button.addEventListener("click", () => {

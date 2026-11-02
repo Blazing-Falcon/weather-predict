@@ -136,7 +136,7 @@ def test_frames_rebuild_whole_dates_and_compare_bmkg_window(tmp_path, monkeypatc
             {
                 "area_id": 1,
                 "analysis_time": T,
-                "first_seen": T + HALF,
+                "first_seen": T + timedelta(minutes=20),
                 "valid_time": T,
                 "weather": 60,
             },
@@ -157,7 +157,7 @@ def test_frames_rebuild_whole_dates_and_compare_bmkg_window(tmp_path, monkeypatc
         score.SCHEMA,
     )
 
-    now = T + HOUR
+    now = T + 4 * HOUR
     result = frames.rebuild(tmp_path, now, 2)
     directory = tmp_path / "gold" / "map_frames"
     part = directory / "date=2025-01-02" / "part.parquet"
@@ -175,12 +175,25 @@ def test_frames_rebuild_whole_dates_and_compare_bmkg_window(tmp_path, monkeypatc
         ("cold", 2): 30,
         ("bmkg", 1): 0,
         ("bmkg", 2): 0,
+        ("bmkg_code", 1): 0,
+        ("bmkg_code", 2): 0,
+        ("bmkg_step", 1): 120,
+        ("bmkg_step", 2): 120,
+        ("bmkg_age", 1): 2,
+        ("bmkg_age", 2): 2,
         ("prob3", 1): 45,
         ("prob3", 2): 60,
         ("prob3", 3): 60,
         ("disagree", 1): 1,
         ("disagree", 2): 0,
     }
+    next_slot = {
+        row["layer"]: row["value"] for row in rows
+        if row["slot"] == T + HALF and row["area_id"] == 1
+    }
+    assert next_slot == {"bmkg": 100, "bmkg_code": 60, "bmkg_step": 30, "bmkg_age": 0}
+    assert {row["layer"]: row["value"] for row in rows
+            if row["slot"] == now and row["area_id"] == 1} == {"bmkg": 0}
     assert frames.rebuild(tmp_path, now, 2) == result
     assert part.read_bytes() == before
     older_bytes = earlier.read_bytes()

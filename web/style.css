@@ -57,7 +57,7 @@ td.num,th.num{text-align:right;font-family:var(--f-mono);font-variant-numeric:ta
 .key{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px}
 .btn{font-family:var(--f-mono);font-size:12px;padding:4px 9px;border-radius:4px;border:1px solid var(--line);background:var(--panel);color:var(--muted);cursor:pointer}
 .btn:hover{color:var(--fg0);border-color:var(--line2)}
-.btn[aria-pressed="true"],#forecastWindow .btn:has(:checked){background:var(--panel2);color:var(--fg0);border-color:var(--yellow)}
+.btn[aria-pressed="true"],:is(#forecastWindow,#alSource) .btn:has(:checked){background:var(--panel2);color:var(--fg0);border-color:var(--yellow)}
 select,input[type=search]{font:inherit;font-size:13px;padding:5px 8px;border-radius:4px;border:1px solid var(--line);background:var(--panel);color:var(--fg)}
 .lvl{display:inline-block;font-family:var(--f-mono);font-size:11px;font-weight:700;padding:1px 7px;border-radius:3px;border:1px solid currentColor;white-space:nowrap}
 .lvl.awas{color:var(--red)} .lvl.siaga{color:var(--orange)} .lvl.waspada{color:var(--waspada)}
@@ -90,9 +90,9 @@ input[type=radio],input[type=checkbox]{accent-color:var(--yellow);margin:0}
 .toggle{display:flex;align-items:center;gap:8px;font-size:13px;padding:3px 8px;cursor:pointer}
 .toggle.disabled{opacity:.45;cursor:not-allowed}
 .btnrow{display:flex;gap:4px;flex-wrap:wrap}
-#forecastWindow .btn{position:relative;display:flex;align-items:center;justify-content:center}
-#forecastWindow input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}
-#forecastWindow .btn:has(:focus-visible){outline:2px solid var(--yellow);outline-offset:2px}
+:is(#forecastWindow,#alSource) .btn{position:relative;display:flex;align-items:center;justify-content:center}
+:is(#forecastWindow,#alSource) input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}
+:is(#forecastWindow,#alSource) .btn:has(:focus-visible){outline:2px solid var(--yellow);outline-offset:2px}
 .legend{display:flex;flex-direction:column;gap:4px;font-size:12.5px}
 .legend .row{display:flex;align-items:center;gap:8px}
 .sw{width:14px;height:14px;border-radius:2px;border:1px solid var(--line);flex:0 0 auto}
@@ -165,6 +165,7 @@ input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;bac
 .legendh i{display:inline-block;width:14px;height:3px;border-radius:2px;margin-right:6px;vertical-align:3px}
 .scroll-x{overflow-x:auto}
 .filters{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+#alSource{align-items:center}
 .star{background:none;border:0;cursor:pointer;font-size:16px;color:var(--muted);padding:0 4px}
 .star[aria-pressed="true"]{color:var(--yellow)}
 .linkbtn{background:none;border:0;color:var(--blue);cursor:pointer;font:inherit;font-size:12.5px;padding:0;text-decoration:underline}
@@ -179,9 +180,9 @@ input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;bac
   #view-alerts .panel{padding-inline:8px}
   #view-alerts .filters{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
   #view-alerts .filters :is(select,input[type=search]){min-width:0}
-  #alCount{grid-column:1/-1}
+  #alCount,#alSource{grid-column:1/-1}
   #view-alerts .scroll-x{overflow:visible}
-  #view-alerts thead,#view-alerts .al-cold{display:none}
+  #view-alerts thead,#alBody:not(.bmkg-alerts) .al-cold{display:none}
   #view-alerts .al-row{display:flex;flex-wrap:wrap;align-items:center;column-gap:8px;padding-bottom:5px;border-bottom:1px solid var(--line)}
   #view-alerts .al-row:last-child{border-bottom:0}
   #view-alerts .al-row td{padding:0;border:0}
@@ -196,6 +197,9 @@ input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;bac
   #view-alerts [data-lead] + [data-lead]::before{content:"· " attr(data-lead) " "}
   #view-alerts .al-cloud::before{content:"Cloud top "}
   #view-alerts .al-bmkg::before{content:"BMKG "}
+  #view-alerts .bmkg-alerts .al-cold{order:5}
+  #view-alerts .bmkg-alerts .al-cold::before{content:"Cold cloud "}
+  #view-alerts .bmkg-alerts .al-bmkg::before{content:"BMKG now "}
   #view-alerts .al-bmkg .chip{border:0;padding:0;font:inherit}
 }
 .star,.linkbtn{min-width:24px;min-height:24px}

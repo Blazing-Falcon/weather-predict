@@ -11,7 +11,7 @@ from nowcast import config, paths
 from nowcast.features.build import CLOUD_PARTS, month_ranges
 from nowcast.log import get_logger
 from nowcast.model.score import HALF_HOUR, UTC_US, partition, read_rows, read_slots
-from nowcast.model.verify import bmkg_result
+from nowcast.model.verify import BLOCK_START, bmkg_result
 from nowcast.parquet import write_table
 
 SCHEMA = pa.schema(
@@ -52,6 +52,8 @@ def rebuild(root: Path, now: datetime, days: int) -> tuple[int, int]:
     target = root / "gold" / "map_frames"
     settings = config.settings()["bmkg"]
     alignment, rain_code = settings["step_alignment"], settings["rain_codes_min"]
+    step_offset = BLOCK_START[alignment] * HALF_HOUR
+    step_duration = timedelta(hours=3)
     runs = defaultdict(lambda: defaultdict(list))
     for part in (silver / "bmkg_forecast").glob("year=*/month=*/part.parquet"):
         for row in read_rows(
@@ -95,13 +97,22 @@ def rebuild(root: Path, now: datetime, days: int) -> tuple[int, int]:
             if slot > now:
                 break
             for area, area_runs in ordered_runs.items():
-                wet, _ = bmkg_result(area_runs, slot, slot, slot + HALF_HOUR, alignment, rain_code)
+                wet, analysis = bmkg_result(
+                    area_runs, slot, slot, slot + HALF_HOUR, alignment, rain_code
+                )
                 if wet is not None:
                     values["bmkg", slot, area] = 100 * wet
+                    for step in runs[area][analysis]:
+                        elapsed = slot - (step["valid_time"] + step_offset)
+                        if timedelta(0) <= elapsed < step_duration:
+                            values["bmkg_code", slot, area] = step["weather"]
+                            values["bmkg_step", slot, area] = elapsed // timedelta(minutes=1)
+                            values["bmkg_age", slot, area] = (slot - analysis) // timedelta(hours=1)
+                            break
                     prob3 = values.get(("prob3", slot, area))
                     if prob3 is not None:
                         wet3, _ = bmkg_result(
-                            area_runs, slot, slot, slot + timedelta(hours=3), alignment, rain_code
+                            area_runs, slot, slot, slot + step_duration, alignment, rain_code
                         )
                         values["disagree", slot, area] = int((prob3 >= 50) != wet3)
 

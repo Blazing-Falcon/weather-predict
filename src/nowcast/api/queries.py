@@ -135,7 +135,7 @@ class Archive:
             last=last,
         )
 
-    def bmkg(self, first, last, area_id=None):
+    def bmkg(self, first, last, area_id=None, *, end=None):
         # Runs publish 3-hour steps up to three days ahead.
         start = first - timedelta(days=4)
         settings = config.settings()["bmkg"]
@@ -148,13 +148,14 @@ class Archive:
             f"FROM data WHERE analysis_time BETWEEN ? AND ? {where}"
         )
         if first == last:
-            # The newest run per area, cut to the one step that can cover the slot.
+            # Pick the newest run before filtering its steps to the requested window.
+            upper = "<=" if end is None else "<"
             sql = (
                 f"SELECT * FROM ({sql} AND first_seen <= ?"
                 " QUALIFY analysis_time = max(analysis_time) OVER (PARTITION BY area_id))"
-                " WHERE valid_time + ? <= ? AND valid_time + ? > ?"
+                f" WHERE valid_time + ? {upper} ? AND valid_time + ? > ?"
             )
-            params = (*params, first, offset, first, offset, first - timedelta(hours=3))
+            params = (*params, first, offset, end or first, offset, first - timedelta(hours=3))
         rows = self.rows(BMKG, sql + " ORDER BY analysis_time DESC", params, first=start, last=last)
         runs = defaultdict(dict)
         for row in rows:
@@ -346,7 +347,7 @@ def area_detail(archive, area_id, area, now):
     }
 
 
-def alerts(archive, threshold, level, island, province):
+def alerts(archive, threshold, level, island, province, source):
     issue = archive.latest(PREDICTIONS, "t")
     if issue is None:
         return {"issue_slot": None, "alerts": []}
@@ -358,10 +359,14 @@ def alerts(archive, threshold, level, island, province):
     clouds = archive.cloud(first, issue)
     by_scan = {(row["area_id"], row["slot"]): row for row in clouds}
     latest = {row["area_id"]: row for row in clouds}
-    forecasts = archive.bmkg(issue, issue)
-    entries = {}
+    forecasts = archive.bmkg(issue, issue, end=issue + timedelta(hours=3))
+    rain_code = config.settings()["bmkg"]["rain_codes_min"]
+    by_area = defaultdict(list)
     for prediction in predictions:
-        area_id = prediction["area_id"]
+        by_area[prediction["area_id"]].append(prediction)
+    selected = []
+    area_ids = forecasts if source == "bmkg" else by_area
+    for area_id in area_ids:
         area = areas.get(area_id, {})
         if island and (area.get("island") or "").casefold() != island.casefold():
             continue
@@ -370,26 +375,41 @@ def alerts(archive, threshold, level, island, province):
             (area.get("prov_name") or "").casefold(),
         }:
             continue
-        if area_id not in entries:
-            cloud = by_scan.get((area_id, prediction["cloud_slot"]), latest.get(area_id, {}))
-            bmkg = weather_at(forecasts.get(area_id, {}), issue, issue)
-            entries[area_id] = {
-                "area_id": area_id,
-                "name": area.get("geo_name"),
-                "province": area.get("prov_name"),
-                "province_code": area.get("prov_code"),
-                "island": area.get("island"),
-                "prob_pct": dict.fromkeys(("1", "2", "3")),
-                "tb_min": cloud.get("tb_min"),
-                "cold_pct": cloud.get("cold_pct"),
-                "cloud_slot": cloud.get("slot"),
-                "bmkg": {**bmkg, "rain": bmkg_rain(bmkg["weather"])},
-            }
-        entries[area_id]["prob_pct"][str(prediction["lead_h"])] = prediction["prob_pct"]
+        runs = forecasts.get(area_id, {})
+        bmkg_3h = None
+        if runs:
+            (analysis, (_, steps)), = runs.items()
+            weather = max((code for code in steps.values() if rain_code <= code <= 99), default=None)
+            if weather is not None:
+                bmkg_3h = {"weather": weather, "analysis_time": analysis}
+        if source == "bmkg" and bmkg_3h is None:
+            continue
 
-    selected = []
-    for entry in entries.values():
-        probability = max((p for p in entry["prob_pct"].values() if p is not None), default=-1)
+        area_predictions = by_area.get(area_id, [])
+        cloud_slot = area_predictions[0]["cloud_slot"] if area_predictions else None
+        cloud = by_scan.get((area_id, cloud_slot), latest.get(area_id, {}))
+        bmkg = weather_at(runs, issue, issue)
+        probabilities = dict.fromkeys(("1", "2", "3"))
+        probabilities.update((str(row["lead_h"]), row["prob_pct"]) for row in area_predictions)
+        probability = max((p for p in probabilities.values() if p is not None), default=-1)
+        entry = {
+            "area_id": area_id,
+            "name": area.get("geo_name"),
+            "province": area.get("prov_name"),
+            "province_code": area.get("prov_code"),
+            "island": area.get("island"),
+            "prob_pct": probabilities,
+            "tb_min": cloud.get("tb_min"),
+            "cold_pct": cloud.get("cold_pct"),
+            "cloud_slot": cloud.get("slot"),
+            "bmkg": {**bmkg, "rain": bmkg_rain(bmkg["weather"])},
+            "bmkg_3h": bmkg_3h,
+        }
+        if source == "bmkg":
+            entry["max_prob_pct"] = probability if probability >= 0 else None
+            selected.append(entry)
+            continue
+
         tb_min = entry["tb_min"]
         rank = (
             3
@@ -407,6 +427,16 @@ def alerts(archive, threshold, level, island, province):
                 max_prob_pct=probability,
             )
             selected.append(entry)
+    if source == "bmkg":
+        selected.sort(
+            key=lambda entry: (
+                -entry["bmkg_3h"]["weather"],
+                -(entry["max_prob_pct"] if entry["max_prob_pct"] is not None else -1),
+                entry["area_id"],
+            )
+        )
+        newest = max((analysis for runs in forecasts.values() for analysis in runs), default=None)
+        return {"issue_slot": issue, "bmkg_analysis_time": newest, "alerts": selected}
     selected.sort(key=lambda entry: (-entry["rank"], -entry["max_prob_pct"], entry["area_id"]))
     return {"issue_slot": issue, "alerts": selected}
 

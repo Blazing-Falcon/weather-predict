@@ -31,7 +31,9 @@ def archive():
 Archive = Annotated[queries.Archive, Depends(archive)]
 AreaId = Annotated[int, PathParam(ge=0, lt=queries.AREA_COUNT)]
 Lead = Annotated[int, Query(ge=1, le=3)]
-Layer = Literal["obs", "cold", "prob1", "prob2", "prob3", "bmkg", "disagree"]
+Layer = Literal[
+    "obs", "cold", "prob1", "prob2", "prob3", "bmkg", "bmkg_code", "bmkg_step", "bmkg_age", "disagree"
+]
 
 
 def cached(query, data, now):
@@ -82,7 +84,7 @@ def area_detail(response: Response, area_id: AreaId, data: Archive):
     return queries.area_detail(data, area_id, area_metadata(data, area_id), datetime.now(UTC))
 
 
-@app.get("/api/alerts", summary="Get rain warning levels for the latest model issue")
+@app.get("/api/alerts", summary="Get model or BMKG rain alerts for the latest model issue")
 def alerts(
     response: Response,
     data: Archive,
@@ -92,12 +94,13 @@ def alerts(
     island: str | None = None,
     province: str | None = None,
     threshold: Annotated[int, Query(ge=0, le=100)] = 50,
+    source: Literal["model", "bmkg"] = "model",
 ):
     response.headers["Cache-Control"] = LIVE_CACHE
     rank = {"waspada": 1, "siaga": 2, "awas": 3, "1": 1, "2": 2, "3": 3}.get(level.casefold())
-    if rank is None:
+    if source == "model" and rank is None:
         raise HTTPException(422, "Choose Waspada, Siaga or Awas.")
-    return queries.alerts(data, threshold, rank, island, province)
+    return queries.alerts(data, threshold, rank, island, province, source)
 
 
 @app.get("/api/scores", summary="Get daily forecast scores by scope and lead")

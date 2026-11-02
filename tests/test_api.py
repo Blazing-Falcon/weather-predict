@@ -244,6 +244,10 @@ def test_area_and_alerts(client, archive):
     assert rows[0]["prob_pct"] == {"1": 10, "2": 10, "3": 85}
     assert rows[0]["tb_min"] == 203
     assert rows[0]["bmkg"]["rain"] is True
+    assert rows[0]["bmkg_3h"] == {
+        "weather": 61, "analysis_time": (slot - timedelta(hours=2)).isoformat(),
+    }
+    assert rows[1]["bmkg_3h"] is None
     for params, expected in (
         ({"level": "awas", "province": "35"}, [2]),
         ({"level": 2, "province": "jawa timur"}, [2, 7, 8]),
@@ -255,6 +259,49 @@ def test_area_and_alerts(client, archive):
 
     scores = client.get("/api/scores", params={"scope": "province", "id": "35", "lead": 3})
     assert scores.json() == data["scores"]["rows"]
+
+
+def test_bmkg_alerts_use_highest_overlapping_rain_code(client, archive, tmp_path, monkeypatch):
+    monkeypatch.setitem(config.settings()["bmkg"], "step_alignment", "centred")
+    slot, _ = archive
+    analysis = slot - timedelta(hours=4)
+    write_rows(
+        tmp_path,
+        "silver/bmkg_forecast",
+        [
+            {"area_id": area, "analysis_time": run, "first_seen": seen,
+             "weather": weather, "valid_time": slot + timedelta(minutes=minutes)}
+            for area, run, seen, weather, minutes in (
+                (2, analysis, analysis, 61, 30),
+                (2, analysis, analysis, 95, 210),
+                (2, slot, slot + timedelta(minutes=1), 0, 90),
+                (7, analysis, analysis, 95, 90),
+                (8, analysis, analysis, 95, 90),
+                (8, slot, slot, 0, 90),
+                (10, analysis, analysis, 65, 90),
+                (11, analysis, analysis, 65, 90),
+                (12, analysis, analysis, 95, 90),
+                (13, analysis, analysis, 95, 270),
+                (14, analysis, analysis, 95, -90),
+                (15, analysis, analysis, 100, 90),
+                (16, analysis, analysis, 65, 90),
+                (17, analysis, analysis, 65, 90),
+            )
+        ],
+        slot,
+    )
+    params = {"source": "bmkg", "level": "awas", "threshold": 100}
+    body = client.get("/api/alerts", params=params).json()
+    assert body["bmkg_analysis_time"] == slot.isoformat()
+    rows = body["alerts"]
+    assert [(row["area_id"], row["bmkg_3h"]["weather"]) for row in rows] == [
+        (7, 95), (2, 95), (12, 95), (10, 65), (11, 65), (16, 65), (17, 65),
+    ]
+    assert rows[1]["bmkg"]["weather"] == 61
+    assert rows[1]["bmkg_3h"]["analysis_time"] == analysis.isoformat()
+    assert rows[2]["prob_pct"] == {"1": None, "2": None, "3": None}
+    filtered = client.get("/api/alerts", params={**params, "province": "35"}).json()
+    assert [row["area_id"] for row in filtered["alerts"]] == [7, 2, 10, 11]
 
 
 def test_missing_datasets(client):

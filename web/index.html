@@ -129,16 +129,22 @@
 <!-- ================= ALERTS ================= -->
 <section class="view" id="view-alerts" hidden><div class="page gutter">
   <div class="page-head"><h1>Rain alerts</h1><span class="note" id="alTime"></span></div>
-  <p class="lede">Areas where our model expects rain within one, two or three hours. Levels follow BMKG's warning names: Waspada at the threshold set in Settings, Siaga at 70% or more, Awas at 85% or more with very cold cloud tops (−70 °C or colder).</p>
+  <p class="lede" id="alModelIntro">Areas where our model expects rain within one, two or three hours. Levels follow BMKG's warning names: Waspada at the threshold set in Settings, Siaga at 70% or more, Awas at 85% or more with very cold cloud tops (−70 °C or colder).</p>
+  <p class="lede" id="alBmkgIntro" hidden>Areas where BMKG's latest forecast has rain within the next 3 hours, ranked by BMKG's category (Hujan Petir, Lebat, Sedang, Ringan).<span id="alBmkgRun"></span></p>
   <div class="panel">
     <div class="filters">
+      <div class="seg" id="alSource" role="radiogroup" aria-labelledby="alSourceLabel">
+        <span class="note" id="alSourceLabel">Source:</span>
+        <label class="btn"><input type="radio" name="alertSource" value="model" checked>Our model</label>
+        <label class="btn"><input type="radio" name="alertSource" value="bmkg">BMKG</label>
+      </div>
       <input type="search" id="alQ" placeholder="Search kab/kota" aria-label="Search kab/kota">
       <select id="alIsland" aria-label="Island"><option value="">All islands</option></select>
       <select id="alProvince" aria-label="Province"><option value="">All provinces</option></select>
       <select id="alLvl" aria-label="Minimum level"><option value="1">Waspada and up</option><option value="2">Siaga and up</option><option value="3">Awas only</option></select>
       <select id="alSort" aria-label="Sort by">
         <option value="">Sort: Default</option>
-        <option value="rank-descending">Level: high to low</option><option value="rank-ascending">Level: low to high</option>
+        <option id="alRankDesc" value="rank-descending">Level: high to low</option><option id="alRankAsc" value="rank-ascending">Level: low to high</option>
         <option value="name-ascending">Kab/kota: A to Z</option><option value="name-descending">Kab/kota: Z to A</option>
         <option value="1-descending">+1 h: high to low</option><option value="1-ascending">+1 h: low to high</option>
         <option value="2-descending">+2 h: high to low</option><option value="2-ascending">+2 h: low to high</option>
@@ -149,13 +155,13 @@
       <span class="note" id="alCount" style="margin-left:auto"></span>
     </div>
     <div class="scroll-x"><table><thead><tr>
-      <th></th><th aria-sort="descending"><button type="button" data-alert-sort="rank">Level</button></th>
+      <th></th><th aria-sort="descending"><button type="button" data-alert-sort="rank" id="alRank">Level</button></th>
       <th><button type="button" data-alert-sort="name">Kab/kota</button></th><th>Island</th>
       <th class="num"><button type="button" data-alert-sort="1">+1 h</button></th>
       <th class="num"><button type="button" data-alert-sort="2">+2 h</button></th>
       <th class="num"><button type="button" data-alert-sort="3">+3 h</button></th>
       <th class="num"><button type="button" data-alert-sort="cloud">Cloud top</button></th>
-      <th class="num">Cold cloud</th><th>BMKG</th><th></th>
+      <th class="num">Cold cloud</th><th id="alBmkgNow">BMKG</th><th></th>
     </tr></thead><tbody id="alBody"></tbody></table></div>
   </div>
 </div></section>

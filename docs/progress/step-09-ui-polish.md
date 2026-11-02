@@ -24,6 +24,7 @@ Date: 2026-11-20. Input: `docs/ui-audit.md` (26 findings). juan picked A01 to A1
 | Change | Commit |
 |---|---|
 | The slider ends at the latest issue. The 3 h forward part is gone, because its frames only showed the same issue at leads 1 to 3. A "Next 1 h / 2 h / 3 h" toggle picks the lead for every frame, past and latest. A Replay select offers 48 h, 7 days and 30 days, and long windows load only the shown layers. The Overview and drawer charts show the last 48 h. The API frame cap and the map frame and tile retention rise to 31 days. | `1c0f692` |
+| On the BMKG layer the tooltip names the BMKG forecast, its 3 h step and its run ("Hujan Ringan · Light Rain", "BMKG 08:30–11:30 WIB, run 20 Nov 19:00 WIB"). Map frames add `bmkg_code`, `bmkg_step` and `bmkg_age` from the same run and step as the `bmkg` layer. Alerts gain a "Source: Our model / BMKG" switch: the BMKG list holds every area whose latest run has rain in the next 3 h (334 areas for the 21 Nov 11:00 WIB issue), ranked Hujan Petir, Lebat, Sedang, Ringan, with our probabilities beside them and no Waspada, Siaga or Awas. | `0bef462` |
 
 ## Verification
 
@@ -35,10 +36,8 @@ Date: 2026-11-20. Input: `docs/ui-audit.md` (26 findings). juan picked A01 to A1
 
 - The 30-day replay has data only from 18 Nov 2026. Older days need the 1 to 17 Nov rain and cloud gap filled, about 30 days of hindcast, and one `nowcast gold frames --days 31` run (writes to `data/`, needs juan's OK).
 - Planned (juan, not built): the 130-row IMERG backfill table on Pipeline closes by default behind a summary line ("130 months, 2016-01 to 2026-10, all complete"), like "Storage by dataset".
-- Planned (juan, not built): on the BMKG layer, the map tooltip shows the BMKG forecast name ("Hujan Ringan · Light Rain"), its 3 h step and its run time, not only Rain or No rain. The map frames need the BMKG weather code and run for this.
 - Planned (juan, not built): the History "Yearly rain" chart tags El Niño and La Niña years from NOAA's Relative Oceanic Niño Index (RONI), the official ENSO index since February 2026. A year is tagged when a 5-season episode at ±0.5 °C covers at least 3 of the June to November seasons. With the current values: La Niña 2016, 2017, 2020 to 2022, 2024 and 2025; El Niño 2023 and 2026 (provisional).
 - Planned (juan, not built): remove the three History panel footnotes (heatmap, Yearly rain and the wet season onset rule).
-- Planned (juan, not built): a "Source: Our model | BMKG" switch on Alerts. The BMKG list shows areas where BMKG forecasts rain in the next 3 h, ranked Hujan Petir, Lebat, Sedang, Ringan, with our probabilities beside them. BMKG rows get no Waspada, Siaga or Awas level, because BMKG uses those names for its own warnings.
 - Planned (juan, not built), pass 2 after the items above: a "How it works" explanation page with interactive parts, data shapes per pipeline step and a glossary. Plan in `docs/plans/explanation-page.md`.
 - A13 to A26 (raster failure note, legends, clipped credits on the 1440 px left card, drawer chart keys, time zones on day changes, Pipeline mobile order, slider `aria-valuetext`, first paint, Model KPI labels and the low items).
 - `config.settings()` is cached for the life of the API process, so any config change needs an API restart.

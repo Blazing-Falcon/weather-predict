@@ -191,9 +191,9 @@
   <div class="page-head"><h1>Rain history</h1><span class="sample"><span id="hCoverage">Archive coverage</span></span></div>
   <div class="filters"><label class="note" for="hA">Area</label><select id="hA"></select><label class="note" for="hB">Compare with</label><select id="hB"><option value="">Nothing</option></select></div>
   <div class="grid">
-    <div class="panel s7"><div class="phead"><h2 id="hHeatT">When it rains</h2><span class="note"><span id="hPeriod">Mean wet share by local hour</span></span></div><svg id="hHeat" viewBox="0 0 600 260" style="width:100%;display:block" role="img" aria-label="Rain frequency by month and hour"></svg><p class="note" id="hHeatNote"></p></div>
-    <div class="panel s5"><div class="phead"><h2>Yearly rain</h2><span class="note">mm per year</span></div><svg id="hYear" viewBox="0 0 440 260" style="width:100%;display:block" role="img" aria-label="Yearly rain totals"></svg><div class="legendh" id="hYearLeg"></div><p class="note">Totals cover archived slots only. ENSO labels are unavailable.</p></div>
-    <div class="panel s12"><div class="phead"><h2>Wet season start and end</h2><span class="note">Onset month and last observed wet dekad</span></div><svg id="hSeason" viewBox="0 0 1200 220" style="width:100%;display:block" role="img" aria-label="Wet season timing per year"></svg><p class="note" id="hRule"></p></div>
+    <div class="panel s7"><div class="phead"><h2 id="hHeatT">When it rains</h2><span class="note"><span id="hPeriod">Mean wet share by local hour</span></span></div><svg id="hHeat" viewBox="0 0 600 260" style="width:100%;display:block" role="img" aria-label="Rain frequency by month and hour"></svg></div>
+    <div class="panel s5"><div class="phead"><h2>Yearly rain</h2><span class="note">mm per year</span></div><svg id="hYear" viewBox="0 0 440 268" style="width:100%;display:block" role="img" aria-label="Yearly rain totals"></svg><div class="legendh" id="hYearLeg"></div></div>
+    <div class="panel s12"><div class="phead"><h2>Wet season start and end</h2><span class="note">Onset month and last observed wet dekad</span></div><svg id="hSeason" viewBox="0 0 1200 220" style="width:100%;display:block" role="img" aria-label="Wet season timing per year"></svg></div>
   </div>
   <div class="panel"><details><summary>Monthly rain and archive coverage</summary><div class="scroll-x"><table><thead><tr><th>Area</th><th>Month</th><th class="num">Rain (mm)</th><th class="num">30-min slots</th></tr></thead><tbody id="hMonths"></tbody></table></div></details></div>
 </div></section>
@@ -281,7 +281,8 @@
     <div class="fresh" id="plHealth"></div>
   </div>
   <div class="panel"><div class="phead"><h2>IMERG backfill, measured</h2></div>
-    <div class="scroll-x"><table><thead><tr><th>Month</th><th>Archived slots</th><th>Expected</th><th>Silver stored</th><th>Status</th></tr></thead><tbody id="plBackfill"></tbody></table></div>
+    <details><summary id="plBackfillSummary">No measured backfill progress recorded.</summary><div class="scroll-x" id="plBackfillContent"></div></details>
+    <template id="plBackfillTable"><table><thead><tr><th>Month</th><th>Archived slots</th><th>Expected</th><th>Silver stored</th><th>Status</th></tr></thead><tbody id="plBackfill"></tbody></table></template>
   </div>
   <h2>What each stage does</h2>
   <div class="stages">

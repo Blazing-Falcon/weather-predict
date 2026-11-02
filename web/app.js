@@ -1178,18 +1178,23 @@ async function renderHistory() {
     heat.append(svgEl("text", { x: 34 + (hour + 0.5) * cw, y: 255, "text-anchor": "middle" },
       String(hour).padStart(2, "0") + "h"));
   }
-  $("hHeatNote").textContent = "Uncolored cells have no archived climatology.";
   const years = [...new Set(history.flatMap(data => data.yearly.map(row => row.year)))].sort((a, b) => a - b);
+  const enso = new Map(history.flatMap(data => (data.enso ?? []).map(row => [row.year, row])));
   const historyColor = data => data.area_id === historyA ? "var(--blue)" : "var(--orange)";
   $("hYearLeg").innerHTML = history.map(data =>
-    `<span><i style="background:${historyColor(data)}"></i>${escape(areaById.get(data.area_id).label)}</span>`).join("");
+    `<span><i style="background:${historyColor(data)}"></i>${escape(areaById.get(data.area_id).label)}</span>`).join("")
+    + '<span class="enso-key">EN El Niño · LN La Niña (June to November phase, NOAA RONI)</span>';
 
   const yearChart = $("hYear");
   const yearWidth = fitChart(yearChart);
+  const step = (yearWidth - 54) / Math.max(1, years.length);
+  const staggerLabels = step < 26;
+  yearChart.viewBox.baseVal.height = staggerLabels ? 296 : 268;
+  const phases = [...enso.values()].filter(row => row.phase).sort((a, b) => a.year - b.year);
+  yearChart.setAttribute("aria-label", ["Yearly rain totals", ...phases.map(({ year, phase, provisional }) =>
+    `${year}: ${phase}${provisional ? " (provisional)" : ""}`)].join(". "));
   if (years.length) {
     yearChart.replaceChildren();
-    const step = (yearWidth - 54) / years.length;
-    const labelEvery = Math.ceil(30 / step);
     const max = Math.max(1, ...history.flatMap(data => data.yearly.map(row => row.rain_mm))) * 1.1;
     const y = value => 10 + (1 - value / max) * 222;
     for (const value of [0, max / 4, max / 2, max * 0.75, max]) {
@@ -1207,7 +1212,16 @@ async function renderHistory() {
         rect.append(svgEl("title", {}, `${decimal(row.rain_mm, 1)} mm over ${count(row.slots)} slots`));
         yearChart.append(rect);
       });
-      if (index % labelEvery === 0) yearChart.append(svgEl("text", { x: center, y: 250, "text-anchor": "middle" }, year));
+      const labelY = 246 + (staggerLabels ? (index % 2) * 28 : 0);
+      yearChart.append(svgEl("text", { x: center, y: labelY, "text-anchor": "middle" }, year));
+      const { phase, provisional } = enso.get(year) ?? {};
+      if (phase) {
+        const warm = phase === "El Niño";
+        const tag = svgEl("text", { x: center, y: labelY + 14, "text-anchor": "middle",
+          class: warm ? "enso-tag enso-warm" : "enso-tag" }, (warm ? "EN" : "LN") + (provisional ? "?" : ""));
+        tag.append(svgEl("title", {}, `${year}: ${phase} (June to November, NOAA RONI)`));
+        yearChart.append(tag);
+      }
     });
   } else chartNote(yearChart, "No yearly totals archived.");
 
@@ -1241,7 +1255,6 @@ async function renderHistory() {
       });
     });
   } else chartNote(season, "No wet-season onset in the available archive.");
-  $("hRule").textContent = primary?.wet_season_rule ?? "";
   $("hMonths").innerHTML = history.flatMap(data => data.monthly.map(row => `
     <tr><td>${escape(areaById.get(data.area_id).label)}</td><td>${months[row.month - 1]} ${row.year}</td>
     <td class="num">${decimal(row.rain_mm, 1)}</td><td class="num">${count(row.slots)}</td></tr>`
@@ -1278,10 +1291,22 @@ function renderPipeline(data) {
       : entry.budget_exceeded ? "Budget exceeded" : "";
     return `<span>${escape(name)}</span><span class="mono note">${stamp ? fmtTime(stamp) : blank}</span><span class="lag">${status}</span>`;
   }).join("");
-  $("plBackfill").innerHTML = Object.entries(data.imerg_backfill).sort(([a], [b]) => b.localeCompare(a)).map(([month, entry]) => `
+  const backfill = Object.entries(data.imerg_backfill).sort(([a], [b]) => b.localeCompare(a));
+  const backfillSummary = $("plBackfillSummary");
+  const backfillContent = $("plBackfillContent");
+  backfillContent.replaceChildren();
+  if (!backfill.length) {
+    backfillSummary.textContent = "No measured backfill progress recorded.";
+    backfillSummary.parentElement.open = false;
+    return;
+  }
+  const pending = backfill.filter(([, entry]) => !entry.done).length;
+  backfillSummary.textContent = `${count(backfill.length)} ${backfill.length === 1 ? "month" : "months"}, ${backfill.at(-1)[0]} to ${backfill[0][0]}, ${pending ? count(pending) + " in progress" : "all complete"}`;
+  backfillContent.append($("plBackfillTable").content.cloneNode(true));
+  $("plBackfill").innerHTML = backfill.map(([month, entry]) => `
     <tr><td>${escape(month)}</td><td>${count(entry.slots)}</td><td>${count(entry.expected)}</td>
     <td>${entry.silver_bytes == null ? blank : size(entry.silver_bytes)}</td><td>${entry.done ? "Complete" : "In progress"}</td></tr>`
-  ).join("") || emptyRow(5, "No measured backfill progress recorded.");
+  ).join("");
 }
 
 function renderSettings() {

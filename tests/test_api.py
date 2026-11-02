@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from nowcast import config
 from nowcast.api.app import app
+from nowcast.api.queries import _read_enso
 
 
 @pytest.fixture
@@ -320,7 +321,8 @@ def test_missing_datasets(client):
     assert client.get("/api/areas/2").json()["observed"] == []
     assert client.get("/api/alerts").json() == {"issue_slot": None, "alerts": []}
     assert client.get("/api/model").json()["card"] is None
-    assert client.get("/api/history/2").json()["yearly"] == []
+    history = client.get("/api/history/2").json()
+    assert history["yearly"] == history["enso"] == []
     assert client.get("/api/pipeline").json()["dagster_runs"] == []
 
 
@@ -382,7 +384,7 @@ def test_model_history_and_pipeline(client, archive, tmp_path):
     assert history["monthly"][0] == {"year": 2020, "month": 9, "rain_mm": 150, "slots": 1}
     assert history["yearly"][0]["rain_mm"] == 150
     assert history["wet_season"][0]["onset_month"] == 9
-    assert "150 mm" in history["wet_season_rule"]
+    assert "wet_season_rule" not in history
 
     health = tmp_path / "state/health"
     health.mkdir(parents=True)
@@ -413,3 +415,44 @@ def test_model_history_and_pipeline(client, archive, tmp_path):
     openapi = client.get("/openapi.json").json()
     assert len(openapi["paths"]) == 12
     assert all(item["get"]["summary"] for item in openapi["paths"].values())
+
+
+def test_history_enso(client, tmp_path):
+    phases = {
+        2016: "La Niña",
+        2017: "La Niña",
+        2018: None,
+        2019: None,
+        2020: "La Niña",
+        2021: "La Niña",
+        2022: "La Niña",
+        2023: "El Niño",
+        2024: "La Niña",
+        2025: "La Niña",
+        2026: "El Niño",
+    }
+    write_rows(
+        tmp_path,
+        "silver/rain_kabkota",
+        [
+            {"slot": datetime(year, 7, 1, tzinfo=UTC), "area_id": 2, "rain_mean_x10": 20}
+            for year in phases
+        ],
+    )
+    history = client.get("/api/history/2").json()
+    assert history["enso"] == [
+        {"year": year, "phase": phase, "provisional": year == 2026}
+        for year, phase in phases.items()
+    ]
+
+
+@pytest.mark.parametrize("seasons", ["0,0,0.5,0.5,0.5,0.5,", "0,0.5,0.5,0.5,0.5,,0.5"])
+def test_enso_requires_five_consecutive_seasons(tmp_path, seasons):
+    path = tmp_path / "roni.csv"
+    path.write_text(
+        "# RONI\nyear,DJF,JFM,FMA,MAM,AMJ,MJJ,JJA,JAS,ASO,SON,OND,NDJ\n"
+        f"2000,0,0,0,0,0,{seasons}\n"
+        "2001,,,,,,,,,,,,\n",
+        encoding="utf-8",
+    )
+    assert _read_enso(path) == ({}, 2000)

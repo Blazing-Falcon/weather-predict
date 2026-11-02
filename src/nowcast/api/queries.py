@@ -1,9 +1,11 @@
 import csv
 import json
 import sqlite3
-from collections import defaultdict
+from collections import Counter, defaultdict
 from contextlib import closing
 from datetime import date, datetime, timedelta
+from itertools import groupby
+from operator import itemgetter
 from pathlib import Path
 
 import duckdb
@@ -510,6 +512,42 @@ def model(archive, now):
     }
 
 
+def _read_enso(path):
+    with path.open(encoding="utf-8", newline="") as source:
+        next(source)
+        reader = csv.DictReader(source)
+        seasons = reader.fieldnames[1:]
+        rows = {int(row["year"]): row for row in reader}
+
+    series = []
+    latest_year = None
+    for year in range(min(rows), max(rows) + 1):
+        row = rows.get(year, {})
+        for season in seasons:
+            phase = None
+            if cell := row.get(season):
+                latest_year = year
+                value = float(cell)
+                if value >= 0.5:
+                    phase = "El Niño"
+                elif value <= -0.5:
+                    phase = "La Niña"
+            series.append((phase, year, season))
+
+    phases = {}
+    for phase, run in groupby(series, key=itemgetter(0)):
+        if phase is None:
+            continue
+        episode = list(run)
+        if len(episode) >= 5:
+            counts = Counter(year for _, year, season in episode if season in ("JJA", "JAS", "ASO", "SON"))
+            phases.update({year: phase for year, count in counts.items() if count >= 3})
+    return phases, latest_year
+
+
+ENSO_PHASES, ENSO_LATEST_YEAR = _read_enso(config.CONFIG_DIR / "enso" / "roni.csv")
+
+
 def history(archive, area_id, area):
     zone = {"WIB": 7, "WITA": 8, "WIT": 9}.get(area["tz"] if area else None, 0)
     totals = archive.rows(
@@ -559,11 +597,10 @@ def history(archive, area_id, area):
             {"year": year, "rain_mm": rain / 20, "slots": slots}
             for year, (rain, slots) in yearly.items()
         ],
-        "wet_season_rule": (
-            "Onset is the first calendar month from September through December with at least "
-            "150 mm recorded. The last wet dekad is the last observed 1–10, 11–20 or 21–end "
-            "period from onset through the following August with at least 50 mm recorded."
-        ),
+        "enso": [
+            {"year": year, "phase": ENSO_PHASES.get(year), "provisional": year == ENSO_LATEST_YEAR}
+            for year in yearly
+        ],
         "wet_season": [
             seasons.get(year, {"year": year, "onset_month": None, "last_wet_dekad": None})
             for year in yearly

@@ -37,7 +37,6 @@ Date: 2026-11-20. Input: `docs/ui-audit.md` (26 findings). juan picked A01 to A1
 ## Open Points
 
 - The 30-day replay has data only from 18 Nov 2026. Older days need the 1 to 17 Nov rain and cloud gap filled, about 30 days of hindcast, and one `nowcast gold frames --days 31` run (writes to `data/`, needs juan's OK).
-- In progress in a separate session, pass 2: a "How it works" explanation page with interactive parts, data shapes per pipeline step and a glossary. Plan in `docs/plans/explanation-page.md`.
 - The lead toggle sits in the left legend card, so the left stack at 1440 × 900 now overflows its scroll box by more than the 14 px in A15 (the credits line is hidden until you scroll).
 - A13 to A26 (raster failure note, legends, clipped credits on the 1440 px left card, drawer chart keys, time zones on day changes, Pipeline mobile order, slider `aria-valuetext`, first paint, Model KPI labels and the low items).
 - `config.settings()` is cached for the life of the API process, so any config change needs an API restart.

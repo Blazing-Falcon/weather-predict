@@ -6,7 +6,7 @@ from playwright.sync_api import Error, expect, sync_playwright
 
 from nowcast import paths
 
-VIEWS = ("map", "overview", "alerts", "model", "history", "pipeline", "settings")
+VIEWS = ("map", "overview", "alerts", "model", "history", "pipeline", "explain", "settings")
 VIEWPORTS = ((1440, 900), (390, 844))
 
 

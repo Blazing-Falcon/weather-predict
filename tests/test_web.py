@@ -40,10 +40,12 @@ def test_web_references_use_approved_urls():
     with TestClient(app) as client:
         refs = References()
         refs.feed(client.get("/").text)
-        assert len([url for url in refs.urls if url.startswith("#")]) == 7
+        assert len([url for url in refs.urls if url.startswith("#")]) == 8
         assert {url for url in refs.urls if not url.startswith("#")} == {
             "/app.js",
+            "/explain.js",
             "/style.css",
+            "/explain.css",
             "/maplibre.css",
             "/maplibre-gl.js",
         }

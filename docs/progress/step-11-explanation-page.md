@@ -67,7 +67,7 @@ Real-data checks:
 
 ## Issues Met
 
-- The shared pre-commit hook (`.git/hooks/pre-commit`, not in git) exits with status 1 in every worktree: under `set -euo pipefail` its `grep "$root/.env"` fails when a worktree has no `.env`. juan chose to fix the hook: line 6 needs `{ grep ... || true; }`. The fix runs outside this worktree, so juan applies it.
+- The shared pre-commit hook (`.git/hooks/pre-commit`, not in git) exits with status 1 in every worktree: under `set -euo pipefail` its `grep "$root/.env"` fails when a worktree has no `.env`. juan fixed the hook on 2026-11-21: it now also reads the main checkout's `.env`, so a worktree gets the full token check, and a missing file no longer ends the hook.
 - The BMKG bronze folder `run=2026-11-20T12` holds bodies of the 00 UTC run as well (BMKG's cache, step 2). The generator takes a body whose `analysis_date` matches its folder.
 
 ## Open Points

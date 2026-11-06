@@ -28,7 +28,7 @@ const settings = {
   alertSource: store.get("alertSource", "model"),
 };
 const watch = new Set(store.get("watch", []));
-const views = ["map", "overview", "alerts", "model", "history", "pipeline", "explain", "settings"];
+const views = ["map", "overview", "alerts", "model", "history", "pipeline", "settings"];
 const prefersLight = matchMedia("(prefers-color-scheme: light)");
 const halfHour = 30 * 60 * 1000;
 const chartFrames = 48 * 2 + 1;
@@ -1329,8 +1329,6 @@ async function renderView(current) {
     renderAlerts();
   } else if (current === "model") {
     renderModel(await read("/api/model", "Model results"));
-  } else if (current === "explain") {
-    await renderExplain();
   } else if (!meta) {
     if (current === "map") {
       renderMapStatus();

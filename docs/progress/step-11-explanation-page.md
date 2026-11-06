@@ -1,6 +1,6 @@
 # Step 11: "How It Works" Page
 
-Date: 2026-11-21. Status: built on branch `claude/explain-page-36c065`, merged into `main` (9244011) and linked from the app (ef239cf). Plan: `docs/plans/explanation-page.md`. Page text and data shapes: `docs/plans/explanation-page-draft.md`.
+Date: 2026-11-21. Status: built and checked on branch `claude/explain-page-36c065`, not yet linked from the app. Plan: `docs/plans/explanation-page.md`. Page text and data shapes: `docs/plans/explanation-page-draft.md`.
 
 ## What Was Built
 
@@ -67,7 +67,7 @@ Real-data checks:
 
 ## Issues Met
 
-- The shared pre-commit hook (`.git/hooks/pre-commit`, not in git) exits with status 1 in every worktree: under `set -euo pipefail` its `grep "$root/.env"` fails when a worktree has no `.env`. The parent session fixed the hook on 2026-11-21 at juan's request: it now also reads the main checkout's `.env`, so a worktree gets the full token check, and a missing file no longer ends the hook.
+- The shared pre-commit hook (`.git/hooks/pre-commit`, not in git) exits with status 1 in every worktree: under `set -euo pipefail` its `grep "$root/.env"` fails when a worktree has no `.env`. juan fixed the hook on 2026-11-21: it now also reads the main checkout's `.env`, so a worktree gets the full token check, and a missing file no longer ends the hook.
 - The BMKG bronze folder `run=2026-11-20T12` holds bodies of the 00 UTC run as well (BMKG's cache, step 2). The generator takes a body whose `analysis_date` matches its folder.
 
 ## Open Points

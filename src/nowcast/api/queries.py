@@ -1,14 +1,16 @@
 import csv
+import gzip
 import json
 import sqlite3
 from collections import Counter, defaultdict
 from contextlib import closing
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from itertools import groupby
 from operator import itemgetter
 from pathlib import Path
 
 import duckdb
+import pyarrow.parquet as pq
 
 from nowcast import config
 from nowcast.retention import _size, disk_usage
@@ -707,6 +709,20 @@ def pipeline(archive, now):
     processed["silver_bytes"] = sum(
         size for name, size in sizes.items() if name.startswith("silver/")
     )
+    storage = {
+        name: {"bytes": sizes.get(name, 0), "cap": policies.get(name)}
+        for name in sorted(sizes.keys() | policies.keys())
+    }
+    for node_id, dataset in PIPELINE_DATASETS.items():
+        detail = pipeline_node(archive, node_id, sample_rows=False)
+        entry = storage.setdefault(dataset, {"bytes": 0, "cap": policies.get(dataset)})
+        if dataset == AREAS and (root / dataset).is_file():
+            entry["bytes"] = (root / dataset).stat().st_size
+        entry["columns"] = detail.get("columns", [])
+        files = detail.get("files", [])
+        entry["newest"] = detail.get("newest") or (
+            files[0]["modified"] if files else detail.get("live", {}).get("created_at")
+        )
     return {
         "as_of": now,
         "health": {
@@ -715,13 +731,151 @@ def pipeline(archive, now):
             if (data := read_json(path)) is not None
         },
         "latency_minutes": latency_stats(root, now),
-        "storage": {
-            name: {"bytes": sizes.get(name, 0), "cap": policies.get(name)}
-            for name in sorted(sizes.keys() | policies.keys())
-        },
+        "storage": storage,
         "storage_total_bytes": report["total_bytes"],
         "storage_budget_gb": report["budget_gb"],
         "processed_vs_stored": processed,
         "dagster_runs": dagster_runs(root),
         "imerg_backfill": read_json(root / "state" / "imerg_backfill.json") or {},
+    }
+
+
+PIPELINE_DATASETS = {
+    "br_bmkg": "bronze/bmkg",
+    "br_himawari": "bronze/himawari",
+    "br_imerg": "bronze/imerg",
+    "br_gauges": "bronze/gauges",
+    "br_mergir": "bronze/mergir",
+    "br_ref": AREAS,
+    "sv_bmkg": BMKG,
+    "sv_cloud": CLOUD,
+    "sv_rain": RAIN,
+    "sv_gauge": GAUGE,
+    "gd_frames": FRAMES,
+    "gd_tiles": "gold/tiles",
+    "gd_pred": PREDICTIONS,
+    "gd_verif": VERIFICATION,
+    "gd_scores": SCORES,
+    "gd_hindcast": "gold/hindcast",
+    "gd_clim": CLIMATOLOGY,
+    "md_models": "models",
+}
+
+
+def pipeline_node(archive, node_id, sample_rows=True):
+    dataset = PIPELINE_DATASETS[node_id]
+    directory = archive.root / dataset
+    if dataset == "models":
+        version = config.settings()["model"]["live_version"]
+        card = read_json(directory / version / "card.json") or {}
+        return {
+            "versions": sorted(path.name for path in directory.glob("*") if path.is_dir()),
+            "live": {key: card[key] for key in ("version", "created_at") if key in card},
+            "test_bss": {
+                lead: details.get("metrics", {}).get("test", {}).get("model", {}).get("bss")
+                for lead, details in card.get("leads", {}).items()
+            },
+        }
+    if dataset.startswith("bronze/") or dataset == "gold/tiles":
+        files = [(path, path.stat()) for path in directory.rglob("*") if path.is_file()]
+        files.sort(key=lambda entry: (entry[1].st_mtime, str(entry[0])), reverse=True)
+        result = {
+            "file_count": len(files),
+            "files": [
+                {
+                    "name": path.relative_to(directory).as_posix(),
+                    "bytes": stat.st_size,
+                    "modified": datetime.fromtimestamp(stat.st_mtime, UTC).isoformat(),
+                }
+                for path, stat in files[:3]
+            ],
+        }
+        preview = next(
+            (
+                path
+                for path, _ in files
+                if (
+                    dataset == "bronze/bmkg"
+                    and path.name.endswith(".jsonl.gz")
+                    and "_dlq" not in path.parts
+                )
+                or (
+                    dataset == "bronze/gauges"
+                    and path.suffix == ".json"
+                    and "metar" in str(path).lower()
+                )
+            ),
+            None,
+        )
+        if preview:
+            if dataset == "bronze/bmkg":
+                with gzip.open(preview, "rt") as stream:
+                    result["json_preview"] = stream.readline()[:1500]
+            else:
+                content = read_json(preview)
+                result["json_preview"] = json.dumps(
+                    content[0] if isinstance(content, list) and content else content
+                )[:1500]
+        return result
+    files = archive.files(dataset)
+    if dataset in (CLOUD, GAUGE):
+        suffix = "part-himawari.parquet" if dataset == CLOUD else "part-metar.parquet"
+        files = [file for file in files if Path(file).name == suffix]
+    if not files:
+        return {"columns": [], "newest_partition": None, "rows": 0, "newest": None, "sample": []}
+    file = files[-1]
+    parquet = pq.ParquetFile(file)
+    columns = [
+        {"name": field.name, "type": str(field.type)}
+        for field in parquet.schema_arrow
+        if field.name not in {"year", "month", "date"}
+    ]
+    time_column = {
+        RAIN: "slot",
+        CLOUD: "slot",
+        FRAMES: "slot",
+        BMKG: "analysis_time",
+        GAUGE: "obs_time",
+        PREDICTIONS: "issued_at",
+        VERIFICATION: "issued_at",
+        "gold/hindcast": "issued_at",
+        SCORES: "day",
+    }.get(dataset)
+    names = ", ".join('"' + col["name"] + '"' for col in columns)
+    order = f'ORDER BY "{time_column}" DESC NULLS LAST' if time_column else ""
+    sample = (
+        archive.rows(dataset, f"SELECT {names} FROM data {order} LIMIT 3", files=[file])
+        if sample_rows
+        else []
+    )
+    newest = sample[0][time_column] if sample and time_column else None
+    if not sample_rows and time_column in parquet.schema_arrow.names:
+        index = parquet.schema_arrow.names.index(time_column)
+        maxima = [
+            stats.max
+            for group in range(parquet.metadata.num_row_groups)
+            if (stats := parquet.metadata.row_group(group).column(index).statistics)
+            and stats.has_min_max
+        ]
+        newest = max(maxima) if maxima else None
+
+    def iso(value):
+        if isinstance(value, datetime):
+            return (
+                value.replace(tzinfo=UTC).isoformat()
+                if value.tzinfo is None
+                else value.astimezone(UTC).isoformat()
+            )
+        if isinstance(value, date):
+            return datetime.combine(value, datetime.min.time(), UTC).isoformat()
+        return value
+
+    return {
+        "columns": columns,
+        "newest_partition": Path(file).relative_to(directory).as_posix()
+        if directory.is_dir()
+        else file.split("/")[-1],
+        "rows": parquet.metadata.num_rows,
+        "newest": iso(newest),
+        "sample": [{key: iso(value) for key, value in row.items()} for row in sample],
     }

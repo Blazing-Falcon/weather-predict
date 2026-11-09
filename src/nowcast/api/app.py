@@ -36,12 +36,12 @@ Layer = Literal[
 ]
 
 
-def cached(query, data, now):
+def cached(query, data, now, *args):
     with _cache_lock:
-        key = query, data.root
+        key = query, data.root, args
         result, expires = _cache.get(key, (None, 0))
         if monotonic() >= expires:
-            result = query(data, now)
+            result = query(data, *args) if args else query(data, now)
             _cache[key] = (result, monotonic() + CACHE_TTL)
         return result
 
@@ -132,6 +132,14 @@ def history(response: Response, area_id: AreaId, data: Archive):
 def pipeline(response: Response, data: Archive):
     response.headers["Cache-Control"] = LIVE_CACHE
     return cached(queries.pipeline, data, datetime.now(UTC))
+
+
+@app.get("/api/pipeline/node/{node_id}", summary="Inspect the newest pipeline dataset")
+def pipeline_node(node_id: str, response: Response, data: Archive):
+    if node_id not in queries.PIPELINE_DATASETS:
+        raise HTTPException(404, "Pipeline dataset not found.")
+    response.headers["Cache-Control"] = LIVE_CACHE
+    return cached(queries.pipeline_node, data, datetime.now(UTC), node_id)
 
 
 def static_file(path: Path, media_type: str):

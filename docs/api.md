@@ -44,3 +44,15 @@ Run `uv run nowcast api` to serve on `127.0.0.1:8000`. Use `--host`, `--port` an
 - No API response fields were added for the web app.
 
 With the API running, run `uv run python experiments/06_web_check.py` to capture and check the seven views at desktop and phone sizes. It uses Playwright 1.62.0 with Chromium revision 1234 and writes to `DATA_ROOT/tmp/web-shots/`.
+
+### Pipeline Node
+
+`GET /api/pipeline/node/{node_id}` returns the newest data for a fixed dataset node from the Pipeline diagram. Unknown IDs return 404. Responses use `Cache-Control: public, max-age=60` and a 60-second server cache per dataset node.
+
+Parquet responses contain `columns` (name and type, without hive partition columns), `newest_partition` (file path relative to the dataset), `rows` (metadata count), `newest` (maximum time), and up to three `sample` rows ordered newest first. Cloud and gauge nodes use only `part-himawari.parquet` and `part-metar.parquet`, respectively. Tables without a time column return the first three rows. Missing datasets return empty columns and samples, zero rows and null partition/time.
+
+File responses contain `file_count` and up to three `files`, ordered by modification time, with relative `name`, `bytes` and UTC ISO `modified`. BMKG and METAR archives can include a `json_preview`, limited to 1,500 characters. Models return `versions`, available live card fields in `live`, and `test_bss` per lead. All returned timestamps use UTC ISO strings.
+
+Only dataset nodes have endpoint IDs: `br_bmkg`, `br_himawari`, `br_imerg`, `br_gauges`, `br_mergir`, `br_ref`, `sv_bmkg`, `sv_cloud`, `sv_rain`, `sv_gauge`, `gd_frames`, `gd_tiles`, `gd_pred`, `gd_verif`, `gd_scores`, `gd_hindcast`, `gd_clim`, `md_models`. The browser requests a sample only when its node is selected, and caches it for 60 seconds.
+
+`/api/pipeline` storage entries also include Parquet `columns` and `newest` from file metadata (or the latest file modification time for file datasets). Column and edge explainers use these without requesting node samples.

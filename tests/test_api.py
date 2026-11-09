@@ -246,7 +246,8 @@ def test_area_and_alerts(client, archive):
     assert rows[0]["tb_min"] == 203
     assert rows[0]["bmkg"]["rain"] is True
     assert rows[0]["bmkg_3h"] == {
-        "weather": 61, "analysis_time": (slot - timedelta(hours=2)).isoformat(),
+        "weather": 61,
+        "analysis_time": (slot - timedelta(hours=2)).isoformat(),
     }
     assert rows[1]["bmkg_3h"] is None
     for params, expected in (
@@ -270,8 +271,13 @@ def test_bmkg_alerts_use_highest_overlapping_rain_code(client, archive, tmp_path
         tmp_path,
         "silver/bmkg_forecast",
         [
-            {"area_id": area, "analysis_time": run, "first_seen": seen,
-             "weather": weather, "valid_time": slot + timedelta(minutes=minutes)}
+            {
+                "area_id": area,
+                "analysis_time": run,
+                "first_seen": seen,
+                "weather": weather,
+                "valid_time": slot + timedelta(minutes=minutes),
+            }
             for area, run, seen, weather, minutes in (
                 (2, analysis, analysis, 61, 30),
                 (2, analysis, analysis, 95, 210),
@@ -296,7 +302,13 @@ def test_bmkg_alerts_use_highest_overlapping_rain_code(client, archive, tmp_path
     assert body["bmkg_analysis_time"] == slot.isoformat()
     rows = body["alerts"]
     assert [(row["area_id"], row["bmkg_3h"]["weather"]) for row in rows] == [
-        (7, 95), (2, 95), (12, 95), (10, 65), (11, 65), (16, 65), (17, 65),
+        (7, 95),
+        (2, 95),
+        (12, 95),
+        (10, 65),
+        (11, 65),
+        (16, 65),
+        (17, 65),
     ]
     assert rows[1]["bmkg"]["weather"] == 61
     assert rows[1]["bmkg_3h"]["analysis_time"] == analysis.isoformat()
@@ -413,7 +425,7 @@ def test_model_history_and_pipeline(client, archive, tmp_path):
     assert pipeline["dagster_runs"][0]["duration_seconds"] == 2
 
     openapi = client.get("/openapi.json").json()
-    assert len(openapi["paths"]) == 12
+    assert len(openapi["paths"]) == 13
     assert all(item["get"]["summary"] for item in openapi["paths"].values())
 
 
@@ -456,3 +468,21 @@ def test_enso_requires_five_consecutive_seasons(tmp_path, seasons):
         encoding="utf-8",
     )
     assert _read_enso(path) == ({}, 2000)
+
+
+def test_pipeline_node(client, archive, tmp_path):
+    assert client.get("/api/pipeline/node/unknown").status_code == 404
+    response = client.get("/api/pipeline/node/sv_rain")
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "public, max-age=60"
+    data = response.json()
+    assert {col["name"] for col in data["columns"]} == {"slot", "area_id", "rain_mean_x10"}
+    assert 0 < len(data["sample"]) <= 3
+    assert data["rows"] == 1
+    directory = tmp_path / "bronze/imerg"
+    directory.mkdir(parents=True)
+    (directory / "crop.nc").write_bytes(b"crop")
+    data = client.get("/api/pipeline/node/br_imerg").json()
+    assert data["file_count"] == 1
+    assert data["files"][0]["name"] == "crop.nc"
+    assert data["files"][0]["bytes"] == 4

@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="/maplibre.css">
   <link rel="stylesheet" href="/style.css">
   <script defer src="/maplibre-gl.js"></script>
+  <script defer src="/pipeline-content.js"></script>
   <script defer src="/app.js"></script>
 </head>
 <body>
@@ -202,74 +203,11 @@
 <section class="view" id="view-pipeline" hidden><div class="page gutter">
   <div class="page-head"><h1>How the data flows</h1></div>
   <p class="lede">Satellite, forecast and gauge feeds land on the homelab. Sensors start the speed layer when new data arrives. The batch layer keeps per-area summaries of the IMERG archive. The web app reads the gold tables.</p>
-  <div class="panel"><div class="scroll-x">
-  <svg class="dg" viewBox="0 0 1250 580" style="width:100%;min-width:1000px;display:block" role="img" aria-label="Pipeline diagram">
-    <defs>
-      <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" style="fill:var(--gray)"/></marker>
-      <marker id="arb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" style="fill:var(--blue)"/></marker>
-    </defs>
-    <rect class="band-speed" x="8" y="42" width="1062" height="292" rx="8"/>
-    <rect class="band-batch" x="8" y="382" width="1062" height="190" rx="8"/>
-    <text class="bandl" x="200" y="326">SPEED LAYER · EVERY NEW FILE</text>
-    <text class="bandl" x="20" y="564">BATCH LAYER · HISTORY AND TRAINING</text>
-    <g><text class="col" x="20" y="28">SOURCES</text><text class="col" x="195" y="28">INGEST</text><text class="col" x="370" y="28">BRONZE · RAW</text><text class="col" x="545" y="28">SILVER · CLEAN</text><text class="col" x="720" y="28">GOLD · READY</text><text class="col" x="905" y="28">MODEL</text><text class="col" x="1090" y="28">SERVE</text></g>
-    <rect class="gold" x="711" y="50" width="168" height="508" rx="8"/>
-
-    <rect class="box" x="20" y="60" width="150" height="52" rx="5"/><text class="t" x="31" y="82">BMKG API</text><text class="s" x="31" y="99">519 kab/kota · 3-h</text>
-    <rect class="box new" x="20" y="140" width="150" height="52" rx="5"/><text class="t" x="31" y="162">Himawari-9 raw</text><text class="s" x="31" y="179">Band 13 · NOAA AWS</text>
-    <rect class="box" x="20" y="220" width="150" height="52" rx="5"/><text class="t" x="31" y="242">IMERG Early</text><text class="s" x="31" y="259">OPeNDAP crop · 30 min</text>
-    <rect class="box" x="20" y="286" width="150" height="40" rx="5" style="stroke-dasharray:4 3"/><text class="t" x="31" y="303">GSMaP_NOW</text><text class="s" x="31" y="318">optional · untested</text>
-    <rect class="box" x="20" y="400" width="150" height="52" rx="5"/><text class="t" x="31" y="422">IMERG archive</text><text class="s" x="31" y="439">Early run · monthly</text>
-    <rect class="box new" x="20" y="480" width="150" height="52" rx="5"/><text class="t" x="31" y="502">GHCNh gauges</text><text class="s" x="31" y="519">airport weather codes</text>
-
-    <rect class="box" x="195" y="60" width="150" height="52" rx="5"/><text class="t" x="206" y="82">ingest_bmkg</text><text class="s" x="206" y="99">schedule · every 3 h</text>
-    <rect class="box new" x="195" y="140" width="150" height="52" rx="5"/><text class="t" x="206" y="162">sensor_himawari</text><text class="s" x="206" y="179">polls S3 every 2 min</text>
-    <rect class="box hot" x="195" y="220" width="150" height="52" rx="5"/><text class="t" x="206" y="242">sensor_imerg</text><text class="s" x="206" y="259">polls every 5 min</text>
-    <rect class="box" x="195" y="400" width="150" height="52" rx="5"/><text class="t" x="206" y="422">backfill_imerg</text><text class="s" x="206" y="439">month by month</text>
-    <rect class="box new" x="195" y="480" width="150" height="52" rx="5"/><text class="t" x="206" y="502">backfill_gauges</text><text class="s" x="206" y="519">yearly files</text>
-
-    <rect class="box" x="370" y="60" width="150" height="52" rx="5"/><text class="t" x="381" y="82">bronze/bmkg</text><text class="s" x="381" y="99">retained JSON</text>
-    <rect class="box" x="370" y="140" width="150" height="52" rx="5"/><text class="t" x="381" y="162">bronze/himawari</text><text class="s" x="381" y="179">short raw window</text>
-    <rect class="box" x="370" y="220" width="150" height="52" rx="5"/><text class="t" x="381" y="242">bronze/imerg</text><text class="s" x="381" y="259">grids · 7 days</text>
-    <rect class="box" x="370" y="400" width="150" height="52" rx="5"/><text class="t" x="381" y="422">tmp download</text><text class="s" x="381" y="439">cropped grids · deleted</text>
-
-    <rect class="box" x="545" y="60" width="150" height="52" rx="5"/><text class="t" x="556" y="82">forecasts</text><text class="s" x="556" y="99">area · run · lead</text>
-    <rect class="box new" x="545" y="140" width="150" height="52" rx="5"/><text class="t" x="556" y="162">cloud_kabkota</text><text class="s" x="556" y="179">cold share + motion</text>
-    <rect class="box hot" x="545" y="220" width="150" height="52" rx="5"/><text class="t" x="556" y="242">grid_cells</text><text class="s" x="556" y="259">30 days · land only</text>
-    <rect class="box" x="545" y="310" width="150" height="52" rx="5"/><text class="t" x="556" y="332">rain_kabkota</text><text class="s" x="556" y="349">10 yr · int16 · ZSTD</text>
-    <rect class="box new" x="545" y="480" width="150" height="52" rx="5"/><text class="t" x="556" y="502">gauge_hourly</text><text class="s" x="556" y="519">rain yes/no per airport</text>
-
-    <rect class="box hot" x="720" y="60" width="150" height="52" rx="5"/><text class="t" x="731" y="82">map_frames</text><text class="s" x="731" y="99">7 days · per layer</text>
-    <rect class="box" x="720" y="140" width="150" height="52" rx="5"/><text class="t" x="731" y="162">scoreboard</text><text class="s" x="731" y="179">forecast vs truth</text>
-    <rect class="box" x="720" y="310" width="150" height="52" rx="5"/><text class="t" x="731" y="332">features</text><text class="s" x="731" y="349">built, not stored</text>
-    <rect class="box" x="720" y="480" width="150" height="52" rx="5"/><text class="t" x="731" y="502">climatology</text><text class="s" x="731" y="519">month × hour</text>
-
-    <rect class="box hot" x="905" y="310" width="150" height="52" rx="5"/><text class="t" x="916" y="332">score_now</text><text class="s" x="916" y="349">+1 / +2 / +3 h</text>
-    <rect class="box" x="905" y="400" width="150" height="52" rx="5"/><text class="t" x="916" y="422">train_lightgbm</text><text class="s" x="916" y="439">Spark features · weekly</text>
-
-    <rect class="box hot" x="1090" y="60" width="150" height="472" rx="5"/>
-    <text class="t" x="1102" y="84">Web app</text><text class="s" x="1102" y="102">FastAPI + DuckDB</text><text class="s" x="1102" y="117">MapLibre GL JS</text>
-    <text class="s" x="1102" y="150">· live map + clouds</text><text class="s" x="1102" y="166">· overview</text><text class="s" x="1102" y="182">· alerts</text><text class="s" x="1102" y="198">· model</text><text class="s" x="1102" y="214">· history</text><text class="s" x="1102" y="230">· pipeline</text>
-    <text class="s" x="1102" y="518">Same-origin API</text>
-    <g>
-      <path class="edge" d="M170 86H193" marker-end="url(#ar)"/><path class="edge" d="M345 86H368" marker-end="url(#ar)"/><path class="edge" d="M520 86H543" marker-end="url(#ar)"/>
-      <path class="edge" d="M170 166H193" marker-end="url(#ar)"/><path class="edge" d="M345 166H368" marker-end="url(#ar)"/><path class="edge" d="M520 166H543" marker-end="url(#ar)"/>
-      <path class="edge" d="M170 246H193" marker-end="url(#ar)"/><path class="edge" d="M345 246H368" marker-end="url(#ar)"/><path class="edge" d="M520 246H543" marker-end="url(#ar)"/>
-      <path class="edge" d="M170 426H193" marker-end="url(#ar)"/><path class="edge" d="M345 426H368" marker-end="url(#ar)"/><path class="edge" d="M520 426H532V342H543" marker-end="url(#ar)"/>
-      <path class="edge" d="M620 272V308" marker-end="url(#ar)"/>
-      <path class="edge" d="M620 362V372H704V506H718" marker-end="url(#ar)"/>
-      <path class="edge" d="M170 506H193" marker-end="url(#ar)"/><path class="edge" d="M345 506H543" marker-end="url(#ar)"/><path class="edge" d="M695 520H710V176H718" marker-end="url(#ar)"/><text class="el" x="604" y="548">gauge check</text>
-      <path class="edge" d="M170 306H182V262H193" marker-end="url(#ar)" style="stroke-dasharray:4 3"/>
-      <line class="bus" x1="704" y1="86" x2="704" y2="336"/>
-      <path class="edge" d="M695 86H703"/><path class="edge" d="M695 166H703"/><path class="edge" d="M695 336H703"/>
-      <path class="edge" d="M705 86H718" marker-end="url(#ar)"/><path class="edge" d="M705 166H718" marker-end="url(#ar)"/><path class="edge" d="M705 336H718" marker-end="url(#ar)"/>
-      <path class="edge" d="M870 336H903" marker-end="url(#ar)"/>
-      <path class="edge" d="M795 362V426H903" marker-end="url(#ar)"/>
-      <path class="edge" d="M980 400V364" marker-end="url(#ar)"/><text class="el" x="988" y="388">model file</text>
-      <path class="edge pred" d="M980 310V250H882" marker-end="url(#arb)"/><text class="el" x="900" y="244" style="fill:var(--blue)">predictions</text>
-      <path class="edge" d="M879 506H1088" marker-end="url(#ar)"/><text class="el" x="940" y="498">API reads gold</text>
-    </g>
-  </svg></div></div>
+  <div id="plLanes" class="pl-chips"></div>
+  <div class="panel"><div class="scroll-x" id="plDiagram"></div></div>
+  <label class="pl-jump">Jump to <select id="plJump" aria-label="Jump to"></select></label>
+  <div id="plExplain" class="panel" hidden aria-live="polite"></div>
+  <div id="plOverview">
   <div class="grid">
     <div class="panel s6"><div class="phead"><h2>Processed vs stored</h2><span class="note">Retained archive</span></div>
       <svg id="plStore" viewBox="0 0 520 240" style="width:100%;display:block" role="img" aria-label="Storage per layer"></svg>
@@ -284,14 +222,6 @@
     <details><summary id="plBackfillSummary">No measured backfill progress recorded.</summary><div class="scroll-x" id="plBackfillContent"></div></details>
     <template id="plBackfillTable"><table><thead><tr><th>Month</th><th>Archived slots</th><th>Expected</th><th>Silver stored</th><th>Status</th></tr></thead><tbody id="plBackfill"></tbody></table></template>
   </div>
-  <h2>What each stage does</h2>
-  <div class="stages">
-    <div class="panel stage-c"><span class="label">Ingest</span><h3>Run when data lands</h3><span class="when2">Himawari every 10 min · IMERG every 30 min · BMKG every 3 h</span><p>Dagster sensors check for the next file and start the chain the moment it exists. Himawari comes as raw Band 13 from NOAA's public AWS bucket, about 12 min after each scan, and only the 2 or 3 segments over Indonesia are read. NASA's OPeNDAP service crops IMERG Early to the Indonesia box. BMKG runs on a schedule and skips runs it already has, using <code>analysis_date</code>. BMKG does not publish past runs, so every run is archived from day one to score it.</p></div>
-    <div class="panel stage-c"><span class="label">Bronze</span><h3>Short raw window</h3><span class="when2">Cropped to the Indonesia box</span><p>Retention caps vary by source. The storage chart shows the limits from the API.</p></div>
-    <div class="panel stage-c"><span class="label">Silver</span><h3>Summaries per area</h3><span class="when2">PySpark for history · DuckDB live</span><p><code>cloud_kabkota</code> holds the coldest cloud top and cold-cloud share per area every 10 min. <code>rain_kabkota</code> holds mean, max cell and wet share per area per 30 min. <code>grid_cells</code> keeps 30 days of land cells. Optical flow on the Band 13 field moves today's cold cloud forward and stores the expected cold-cloud share per area at +1, +2 and +3 h. <code>gauge_hourly</code> turns GHCNh airport weather codes into rain yes/no, as an independent check on IMERG.</p></div>
-    <div class="panel stage-c"><span class="label">Gold</span><h3>Built for the app</h3><span class="when2">after each silver update</span><p><code>map_frames</code> stores one row per area, slot and layer, with 31-day retention. <code>features</code> is built when the model needs it and never written to disk.</p></div>
-    <div class="panel stage-c"><span class="label">Model</span><h3>Train weekly, score every slot</h3><span class="when2">LightGBM · +1, +2, +3 h</span><p>Spark builds the training rows and LightGBM trains on one node. It trains on IMERG Early history, the same product that arrives live, and retrains when NASA moves Early to V08. Fresh Himawari cloud tops and their motion cover the time before IMERG arrives. Predictions are stored before the truth exists, so the scoreboard is fair.</p></div>
-    <div class="panel stage-c"><span class="label">Serve</span><h3>Map-first web app</h3><span class="when2">FastAPI + DuckDB · MapLibre GL JS</span><p>The API reads archived frames from Parquet. Cloud frames are served as small WebP images that the browser tints in the gruvbox palette.</p></div>
   </div>
 </div></section>
 

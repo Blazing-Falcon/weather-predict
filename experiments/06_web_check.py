@@ -6,7 +6,18 @@ from playwright.sync_api import Error, expect, sync_playwright
 
 from nowcast import paths
 
-VIEWS = ("map", "overview", "alerts", "model", "history", "pipeline", "settings")
+VIEWS = (
+    "map",
+    "overview",
+    "alerts",
+    "model",
+    "history",
+    "pipeline",
+    "settings",
+    "pipeline/node/sv_rain",
+    "pipeline/edge/br_imerg~sv_rain",
+    "pipeline/lane/rain",
+)
 VIEWPORTS = ((1440, 900), (390, 844))
 
 
@@ -83,14 +94,22 @@ def main():
                 )
                 try:
                     page.goto(base + ("/" if name == "map" else f"/#{name}"), timeout=30000)
-                    expect(page.locator(f"#view-{name}")).to_have_attribute(
+                    expect(page.locator(f"#view-{name.split('/')[0]}")).to_have_attribute(
                         "aria-busy", "false", timeout=30000
                     )
                     expect(page.locator("#dataStatus")).to_be_hidden()
                     if name == "map":
                         expect(page.locator("#map canvas.maplibregl-canvas")).to_be_visible()
                         page.wait_for_function("map.loaded()")
-                    page.screenshot(path=shots / f"{name}-{width}.png")
+                    if name.startswith("pipeline/"):
+                        expect(page.locator("#plExplain")).to_be_visible()
+                        expect(page.locator("#plExplain")).not_to_contain_text(
+                            "Loading current data"
+                        )
+                    page.screenshot(
+                        path=shots / f"{name.replace('/', '-')}-{width}.png",
+                        full_page=name.startswith("pipeline"),
+                    )
                     if name == "map":
                         capture_map_states(page, shots, width)
                 except (Error, AssertionError) as error:

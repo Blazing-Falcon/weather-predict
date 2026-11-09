@@ -232,9 +232,6 @@ td:has(> :is(.star,.linkbtn)){padding-block:0}
 .dg .band-batch{fill:color-mix(in srgb,var(--yellow) 9%,var(--bg))}
 .dg text.bandl{font-weight:700;font-size:11px;letter-spacing:.06em;fill:var(--muted)}
 .dg .gold{fill:none;stroke:var(--yellow);stroke-dasharray:4 4;stroke-width:1.2}
-.stages{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:12px}
-.stage-c .when2{font-family:var(--f-mono);font-size:11.5px;color:var(--blue)}
-.stage-c p{font-size:13.5px;color:var(--muted)}
 code{font-family:var(--f-mono);font-size:12px;background:var(--panel2);padding:1px 5px;border-radius:3px;color:var(--fg)}
 .chip{display:inline-block;font-family:var(--f-mono);font-size:11.5px;padding:0 7px;border-radius:3px;border:1px solid var(--line)}
 
@@ -269,3 +266,29 @@ summary{cursor:pointer;color:var(--muted)}
   .when{flex-basis:100%}
   .ticks span{font-size:9px}
 }
+
+.pl-chips{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
+.pl-chips button,.pl-cards [role=button],[data-pl]{cursor:pointer}
+.dg{width:100%;min-width:1200px;display:block}
+.dg .pl-hit{fill:none;stroke:transparent;stroke-width:12;pointer-events:stroke}
+.dg .el{opacity:0;pointer-events:none;paint-order:stroke;stroke:var(--panel);stroke-width:4px}
+.dg .pl-edge:hover .el,.dg .pl-edge:focus .el,.dg .pl-lit .el{opacity:1}
+.pl-dim{opacity:.25}
+[data-pl]:focus-visible{outline:2px solid var(--yellow);outline-offset:4px}
+.dg [data-pl]:focus-visible .box{stroke:var(--yellow);stroke-width:3}
+[aria-pressed=true].chip{border-color:var(--yellow);color:var(--yellow)}
+.pl-jump{display:block;margin:12px 0}
+.pl-jump select{max-width:85%;margin-left:8px}
+#plExplain h3{margin:18px 0 8px}
+#plExplain pre{overflow:auto;max-height:260px;white-space:pre-wrap;overflow-wrap:anywhere}
+#plExplain td{font-family:var(--f-mono);font-size:12px}
+#plExplain .mono{overflow-wrap:anywhere}
+.pl-facts{display:flex;flex-wrap:wrap;gap:12px;font-family:var(--f-mono);font-size:12px;margin-top:16px}
+.pl-cards{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.pl-cards>*{min-width:0}
+@media(max-width:600px){.pl-cards{grid-template-columns:1fr}}
+
+button.chip{padding:5px 8px;background:var(--panel);border:1px solid var(--line2);border-radius:4px;color:var(--fg0);font:inherit;font-size:12px;text-align:left}
+
+#plExplain table{min-width:580px}
+#plExplain td{white-space:nowrap}

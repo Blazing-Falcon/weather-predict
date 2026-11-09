@@ -43,12 +43,13 @@ def test_web_references_use_approved_urls():
         assert len([url for url in refs.urls if url.startswith("#")]) == 7
         assert {url for url in refs.urls if not url.startswith("#")} == {
             "/app.js",
+            "/pipeline-content.js",
             "/style.css",
             "/maplibre.css",
             "/maplibre-gl.js",
         }
 
         script = client.get("/app.js").text
-        urls = set(re.findall(r"""['"`]((?:https?://|/)[^'"`\s]*)""", script))
+        urls = set(re.findall(r"""['"`]((?:https?://|/[a-z])[^'"`\s]*)""", script))
         urls.discard("http://www.w3.org/2000/svg")
         assert {url.split("/")[1] for url in urls} == {"api", "tiles", "geo"}

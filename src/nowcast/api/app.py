@@ -139,7 +139,7 @@ def pipeline_node(node_id: str, response: Response, data: Archive):
     if node_id not in queries.PIPELINE_DATASETS:
         raise HTTPException(404, "Pipeline dataset not found.")
     response.headers["Cache-Control"] = LIVE_CACHE
-    return cached(queries.pipeline_node, data, datetime.now(UTC), node_id)
+    return queries.pipeline_node(data, node_id)
 
 
 def static_file(path: Path, media_type: str):

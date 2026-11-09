@@ -1,3 +1,4 @@
+import gzip
 import json
 import sqlite3
 from collections import defaultdict
@@ -486,3 +487,33 @@ def test_pipeline_node(client, archive, tmp_path):
     assert data["file_count"] == 1
     assert data["files"][0]["name"] == "crop.nc"
     assert data["files"][0]["bytes"] == 4
+
+
+def test_pipeline_bmkg_preview(client, tmp_path):
+    directory = tmp_path / "bronze/bmkg"
+    directory.mkdir(parents=True)
+    step = {
+        "local_datetime": "2026-11-21 12:00:00", "weather": 60,
+        "weather_desc": "Hujan Ringan", "tp": 1.2, "tcc": 90, "t": 26, "hu": 80,
+        "image": "unused",
+    }
+    location = {"desa": "Test", "kecamatan": "District", "kotkab": "City",
+                "provinsi": "Province", "lat": -6, "lon": 107, "adm1": "unused"}
+    record = {
+        "area_id": 70, "adm4": "75.03.11.2001",
+        "fetched_at": "2026-11-21T05:00:00Z", "http_status": 200,
+        "body": json.dumps({"lokasi": location, "data": [{"cuaca": [[step, step], [step]]}]}),
+    }
+    with gzip.open(directory / "answers.jsonl.gz", "wt") as stream:
+        stream.write(json.dumps(record) + "\n")
+    (directory / "_dlq").mkdir()
+    (directory / "_dlq/bad.jsonl").write_text("invalid")
+    data = client.get("/api/pipeline/node/br_bmkg").json()
+    assert data["file_count"] == 1
+    assert data["files"][0]["name"] == "answers.jsonl.gz"
+    assert data["json_preview"] == {
+        **{key: value for key, value in record.items() if key != "body"},
+        "lokasi": {key: value for key, value in location.items() if key != "adm1"},
+        "step_count": 3,
+        "steps": [{key: value for key, value in step.items() if key != "image"}] * 2,
+    }

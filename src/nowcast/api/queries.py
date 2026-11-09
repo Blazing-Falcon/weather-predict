@@ -777,7 +777,11 @@ def pipeline_node(archive, node_id, sample_rows=True):
             },
         }
     if dataset.startswith("bronze/") or dataset == "gold/tiles":
-        files = [(path, path.stat()) for path in directory.rglob("*") if path.is_file()]
+        files = [
+            (path, path.stat())
+            for path in directory.rglob("*")
+            if path.is_file() and not (dataset == "bronze/bmkg" and "_dlq" in path.parts)
+        ]
         files.sort(key=lambda entry: (entry[1].st_mtime, str(entry[0])), reverse=True)
         result = {
             "file_count": len(files),
@@ -810,12 +814,30 @@ def pipeline_node(archive, node_id, sample_rows=True):
         if preview:
             if dataset == "bronze/bmkg":
                 with gzip.open(preview, "rt") as stream:
-                    result["json_preview"] = stream.readline()[:1500]
+                    record = json.loads(stream.readline())
+                body = json.loads(record["body"])
+                steps = [step for point in body["data"] for day in point["cuaca"] for step in day]
+                result["json_preview"] = {
+                    **{key: record.get(key) for key in ("area_id", "adm4", "fetched_at", "http_status")},
+                    "lokasi": {
+                        key: body["lokasi"].get(key)
+                        for key in ("desa", "kecamatan", "kotkab", "provinsi", "lat", "lon")
+                    },
+                    "step_count": len(steps),
+                    "steps": [
+                        {key: step.get(key) for key in (
+                            "local_datetime", "weather", "weather_desc", "tp", "tcc", "t", "hu"
+                        )}
+                        for step in steps[:2]
+                    ],
+                }
             else:
                 content = read_json(preview)
-                result["json_preview"] = json.dumps(
-                    content[0] if isinstance(content, list) and content else content
-                )[:1500]
+                if content:
+                    result["json_preview"] = {
+                        key: content[0].get(key)
+                        for key in ("icaoId", "reportTime", "wxString", "rawOb", "lat", "lon")
+                    }
         return result
     files = archive.files(dataset)
     if dataset in (CLOUD, GAUGE):

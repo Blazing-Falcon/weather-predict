@@ -1670,57 +1670,112 @@ const plAttrs = (key, title) => `data-pl="${escape(key)}" tabindex="0" role="but
 const plChip = (key, title) => `<button type="button" class="chip" ${plAttrs(key, title)}>${escape(title)}</button>`;
 const plNodeChip = id => plChip(`node/${id}`, plNodes.get(id).title);
 const plTable = (heads, rows) => `<div class="scroll-x"><table><thead><tr>${heads.map(h => `<th>${escape(h)}</th>`).join('')}</tr></thead><tbody>${rows.map(row => `<tr>${row.map(cell => `<td>${cell}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+const plPos = node => ({x: 24 + node.col * 195, y: 80 + node.row * 84, h: (node.rows || 1) * 84 - 30});
 function drawPipeline() {
-  const pos = node => ({x: 24 + node.col * 224, y: 64 + node.row * 84, h: (node.rows || 1) * 84 - 30});
-  let svg = `<svg class="dg" viewBox="0 0 1588 850" aria-label="Pipeline diagram"><defs><marker id="plArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L10 5L0 10z" fill="var(--gray)"/></marker></defs>`;
-  svg += `<rect class="band-speed" x="12" y="47" width="432" height="338" rx="8"/><text class="bandl" x="24" y="380">LIVE</text><rect class="band-batch" x="12" y="467" width="432" height="338" rx="8"/><text class="bandl" x="24" y="800">HISTORY</text>`;
-  svg += PIPELINE.columns.map((col, i) => `<text class="col" x="${24 + i * 224}" y="28" ${plAttrs(`col/${col.id}`, col.title)}>${escape(col.title)}</text>`).join('');
-  svg += [...plEdges].map(([id, edge], i) => {
-    const from = plNodes.get(edge.from), to = plNodes.get(edge.to), a = pos(from), b = pos(to);
-    const y = a.y + 27, endY = b.y + (to.rows ? 27 + from.row * 75 : 27);
-    const start = a.x + 184, gap = a.x + 200 + i % 4 * 4;
+  let svg = `<svg class="dg" viewBox="0 0 1380 850" aria-label="Pipeline diagram"><defs><marker id="plArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L10 5L0 10z" fill="var(--gray)"/></marker></defs>`;
+  svg += `<rect class="band-speed" x="12" y="47" width="384" height="356" rx="8"/><text class="bandl" x="24" y="66">LIVE</text><rect class="band-batch" x="12" y="467" width="384" height="356" rx="8"/><text class="bandl" x="24" y="486">HISTORY</text>`;
+  svg += PIPELINE.columns.map((col, i) => `<text class="col" x="${24 + i * 195}" y="28" ${plAttrs(`col/${col.id}`, col.title)}>${escape(col.title)}</text>`).join('');
+  const busX = plPos(plNodes.get('srv_api')).x - 12;
+  const busY = 80 + 27;
+  const joins = [];
+  const tracks = new Map(), gutters = new Map();
+  const routeGap = (col, y1, y2) => {
+    const lanes = tracks.get(col) || [];
+    const low = Math.min(y1, y2), high = Math.max(y1, y2);
+    let lane = lanes.findIndex(spans => spans.every(([a, b]) => high < a || low > b));
+    if (lane < 0) lane = lanes.length;
+    (lanes[lane] ||= []).push([low, high]);
+    tracks.set(col, lanes);
+    return 24 + col * 195 + 165 + 4 + lane * 3;
+  };
+  svg += [...plEdges].map(([id, edge]) => {
+    const from = plNodes.get(edge.from), to = plNodes.get(edge.to), a = plPos(from), b = plPos(to);
+    const y = a.y + 27, endY = b.y + 27;
+    const start = a.x + 165;
     let d;
-    if (to.col === from.col + 1) d = `M${start} ${y}H${gap}V${endY}H${b.x}`;
-    else {
-      // Long links use row gutters, with vertical runs confined to column gaps.
-      const gutter = Math.max(a.y + a.h, b.y + b.h) + 12 + i % 3 * 5;
-      const endGap = b.x - 12 - i % 3 * 4;
+    if (to.id === 'srv_api') {
+      const gutter = a.y + a.h + 6 + (gutters.get(from.row) || 0) * 5;
+      gutters.set(from.row, (gutters.get(from.row) || 0) + 1);
+      const gap = routeGap(from.col, y, gutter);
+      d = `M${start} ${y}H${gap}V${gutter}H${busX}`;
+      joins.push(gutter);
+    } else if (to.col === from.col && Math.abs(to.row - from.row) === 1) {
+      const down = to.row > from.row;
+      d = `M${a.x + 82.5} ${down ? a.y + a.h : a.y}V${down ? b.y : b.y + b.h}`;
+    } else if (to.col === from.col) {
+      const side = routeGap(from.col - 1, y, endY);
+      d = `M${a.x} ${y}H${side}V${endY}H${b.x}`;
+    } else if (to.col < from.col) {
+      const side = routeGap(from.col - 1, y, endY);
+      d = `M${a.x} ${y}H${side}V${endY}H${b.x + 165}`;
+    } else if (to.col === from.col + 1) {
+      const gap = routeGap(from.col, y, endY);
+      d = `M${start} ${y}H${gap}V${endY}H${b.x}`;
+    } else {
+      const gutter = a.y + a.h + 6 + (gutters.get(from.row) || 0) * 5;
+      gutters.set(from.row, (gutters.get(from.row) || 0) + 1);
+      const gap = routeGap(from.col, y, gutter);
+      const endGap = routeGap(to.col - 1, gutter, endY);
       d = `M${start} ${y}H${gap}V${gutter}H${endGap}V${endY}H${b.x}`;
     }
-    return `<g class="pl-edge" ${plAttrs(`edge/${id}`, `${from.title} → ${to.title}: ${edge.label}`)}><path class="edge" d="${d}" marker-end="url(#plArrow)"/><path class="pl-hit" d="${d}"/><text class="el" text-anchor="middle" x="${gap}" y="${y - 8}" transform="rotate(-90 ${gap} ${y - 8})">${escape(edge.label)}</text></g>`;
+    return `<g class="pl-edge" ${plAttrs(`edge/${id}`, `${from.title} → ${to.title}: ${edge.label}`)}><title>${escape(edge.label)}</title><path class="edge" d="${d}" ${to.id === 'srv_api' ? '' : 'marker-end="url(#plArrow)"'}/><path class="pl-hit" d="${d}"/></g>`;
   }).join('');
+  svg += `<path class="edge pl-bus" ${plAttrs('node/srv_api', 'Web app')} d="M${busX} ${Math.max(...joins)}V${busY}H${busX + 12}" marker-end="url(#plArrow)"/>`;
   svg += PIPELINE.nodes.map(node => {
-    const {x, y, h} = pos(node);
-    return `<g class="pl-node" ${plAttrs(`node/${node.id}`, node.title)}><rect class="box" x="${x}" y="${y}" width="184" height="${h}" rx="5"/><text class="t" x="${x + 9}" y="${y + 22}">${escape(node.title)}</text><text class="s" x="${x + 9}" y="${y + 40}">${escape(node.sub)}</text></g>`;
+    const {x, y, h} = plPos(node);
+    const words = node.sub.split(' '), lines = [''];
+    for (const word of words) {
+      if ((lines[lines.length - 1] + word).length > 25) lines.push('');
+      lines[lines.length - 1] += (lines[lines.length - 1] ? ' ' : '') + word;
+    }
+    return `<g class="pl-node" ${plAttrs(`node/${node.id}`, node.title)}><rect class="box" x="${x}" y="${y}" width="165" height="${h}" rx="5"/><text class="t" x="${x + 9}" y="${y + 20}">${escape(node.title)}</text>${lines.map((line, i) => `<text class="s" x="${x + 9}" y="${y + 35 + i * 12}">${escape(line)}</text>`).join('')}${node.id === 'srv_api' ? views.map((page, i) => `<text class="s" x="${x + 9}" y="${y + 65 + i * 20}">${page}</text>`).join('') : ''}</g>`;
   }).join('');
   $('plDiagram').innerHTML = svg + '</svg>';
   $('plLanes').innerHTML = plChip('', 'Whole pipeline') + PIPELINE.lanes.map(lane => plChip(`lane/${lane.id}`, lane.title)).join('');
   $('plJump').innerHTML = '<option value="">Whole pipeline</option>' + PIPELINE.columns.map((col, i) => `<optgroup label="${escape(col.title)}">${PIPELINE.nodes.filter(n => n.col === i).map(n => `<option value="node/${n.id}">${escape(n.title)}</option>`).join('')}</optgroup>`).join('') + `<optgroup label="Lanes">${PIPELINE.lanes.map(l => `<option value="lane/${l.id}">${escape(l.title)}</option>`).join('')}</optgroup>`;
 }
-function plShape(node) {
+const plTime = value => value ? `${dayFormat.format(new Date(value))}, ${clockWib(value)}` : blank;
+const plType = type => type.startsWith('timestamp') ? 'time (UTC)' : type.startsWith('dictionary') || type === 'string' ? 'text' : type === 'bool' ? 'yes/no' : type;
+function plValue(value, key = '', tz = 'WIB') {
+  if (value == null) return value;
+  if (Array.isArray(value)) return value.map(item => plValue(item, '', tz));
+  if (typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, plValue(v, k, tz)]));
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}[T ]\d{2}:/.test(value)) {
+    return plTime(key === 'local_datetime' ? value.replace(' ', 'T') + {WIB: '+07:00', WITA: '+08:00', WIT: '+09:00'}[tz] : value);
+  }
+  return value;
+}
+function plShape(node, compact = false) {
   const data = plCache.get(node.id)?.data || plStorage[node.dataset];
   if (node.id === 'gd_features') return `<p>${escape(node.note)}</p>`;
-  if (node.example) return `<pre>${escape(node.example)}</pre>`;
+  if (node.example) return `<pre>${escape(node.example.replace(/\d{4}-\d{2}-\d{2}T[\d:]+Z/g, value => plTime(value)))}</pre>`;
   if (!node.dataset) return '';
-  const columns = data?.columns || Object.keys(node.fields || {}).map(name => ({name, type: ''}));
-  if (!columns.length) return `<p>${escape(node.summary)}</p>`;
-  return plTable(['Name', 'Type', 'Meaning'], columns.map(col => [escape(col.name), escape(col.type), escape(node.fields?.[col.name] || '')]));
+  const columns = data?.columns?.length ? data.columns : Object.keys(node.fields || {}).map(name => ({name, type: ''}));
+  if (!columns.length) return '';
+  if (compact) return `<dl class="pl-shape">${columns.map(col => `<dt>${escape(col.name)}</dt><dd>${escape(plType(col.type))}</dd>`).join('')}</dl>`;
+  return plTable(['Name', 'Type', 'Meaning'], columns.map(col => [escape(col.name), escape(plType(col.type)), escape(node.fields?.[col.name] || '')]));
 }
 function plNodeBody(node, data, status = '') {
   const incoming = PIPELINE.edges.filter(e => e.to === node.id), outgoing = PIPELINE.edges.filter(e => e.from === node.id);
   const storage = plStorage[node.dataset];
+  const cap = storage?.cap, newest = data?.newest || data?.files?.[0]?.modified || data?.live?.created_at || storage?.newest;
+  const shape = plShape(node);
   let current = '';
-  if (data?.sample) current = plTable(data.columns.map(c => c.name), data.sample.map(row => data.columns.map(c => escape(row[c.name] == null ? '' : String(row[c.name])))));
-  if (data?.files) current = plTable(['Name', 'Bytes', 'Time WIB'], data.files.map(f => [escape(f.name), count(f.bytes), escape(clockWib(f.modified))])) + `<p>${count(data.file_count)} files</p>`;
-  if (data?.json_preview) current += `<pre>${escape(data.json_preview)}</pre>`;
-  if (data?.versions) current = `<pre>${escape(JSON.stringify(data, null, 2))}</pre>`;
-  return `<h2>${plNodeChip(node.id)} <span class="chip">${escape(node.kind)}</span></h2><p class="note">${escape(node.sub)}</p><p>${escape(node.summary)}</p>
-    <h3>Comes from</h3>${node.from ? `<p class="mono">${escape(node.from)}</p>` : ''}<div class="pl-chips">${incoming.map(e => plNodeChip(e.from)).join('')}</div>
-    <h3>Steps</h3>${node.how ? `<ol>${node.how.map(step => `<li>${escape(step)}</li>`).join('')}</ol>` : ''}
-    ${incoming.filter(e => e.do).map(e => `<p>On the way in: ${plChip(`edge/${e.from}~${e.to}`, e.label)}: ${escape(e.do)}</p>`).join('')}
-    <h3>Data shape</h3>${plShape(node)}${node.dataset ? `<h3>Current data</h3>${status}${current}` : ''}
-    <div class="pl-facts"><span>${escape(node.sub)}</span>${storage ? `<span>Retention: ${escape(JSON.stringify(storage.cap))}</span><span>${size(storage.bytes)}</span>` : ''}${data ? `<span>Newest: ${escape(data.newest || data.files?.[0]?.modified || blank)}</span>${data.rows != null ? `<span>${count(data.rows)} rows in newest partition</span>` : ''}` : ''}${node.command ? `<code>${escape(node.command)}</code>` : ''}</div>
-    ${node.note && node.id !== 'gd_features' ? `<p>${escape(node.note)}</p>` : ''}<h3>Goes to</h3><div class="pl-chips">${outgoing.map(e => plNodeChip(e.to)).join('')}</div>`;
+  if (data?.sample?.length) current = '<div class="pl-sample">' + plTable(data.columns.map(c => c.name), data.sample.map(row => data.columns.map(c => {
+    const value = plValue(row[c.name], c.name) ?? '';
+    const area = c.name === 'area_id' && areaById.get(Number(value));
+    return escape(String(value) + (area ? ` · ${area.geo_name}` : ''));
+  }))) + '</div>';
+  if (data?.files) current = '<div class="pl-files">' + plTable(['Name', 'Bytes', 'Time WIB'], data.files.map(f => [escape(f.name), count(f.bytes), escape(plTime(f.modified))])) + `</div><p>${count(data.file_count)} files</p>`;
+  if (data?.json_preview) current += `<pre>${escape(JSON.stringify(plValue(data.json_preview, '', areaById.get(data.json_preview.area_id)?.tz), null, 2))}</pre>`;
+  if (data?.versions) current = `<p>Live version: ${escape(data.live.version || blank)} · ${escape(plTime(data.live.created_at))}</p>` + plTable(['Lead (h)', 'Test Brier skill'], Object.entries(data.test_bss).map(([lead, skill]) => [escape(lead), decimal(skill, 3)]));
+  return `<h2>${plNodeChip(node.id)} <span class="chip">${escape(node.kind)}</span></h2>
+    <div class="pl-facts"><span>${escape(node.sub)}</span>${cap?.keep ? `<span>keep ${escape(cap.keep)}</span>` : cap?.keep_versions ? `<span>keep ${cap.keep_versions} versions</span>` : ''}${storage ? `<span>${size(storage.bytes)}</span>` : ''}${newest ? `<span>newest ${escape(plTime(newest))}</span>` : ''}${data?.rows != null ? `<span>${count(data.rows)} rows</span>` : ''}${node.command ? `<code>${escape(node.command)}</code>` : ''}</div>
+    <div class="pl-detail"><div><p>${escape(node.summary)}</p>
+    ${node.from || incoming.length ? `<h3>Comes from</h3>${node.from ? `<p class="mono">${escape(node.from)}</p>` : ''}<div class="pl-chips">${incoming.map(e => plNodeChip(e.from)).join('')}</div>` : ''}
+    ${node.how?.length || incoming.some(e => e.do) ? `<h3>Steps</h3>${node.how ? `<ol>${node.how.map(step => `<li>${escape(step)}</li>`).join('')}</ol>` : ''}${incoming.filter(e => e.do).map(e => `<p>On the way in: ${plChip(`edge/${e.from}~${e.to}`, e.label)}: ${escape(e.do)}</p>`).join('')}` : ''}
+    ${node.note && node.id !== 'gd_features' ? `<p>${escape(node.note)}</p>` : ''}${outgoing.length ? `<h3>Goes to</h3><div class="pl-chips">${outgoing.map(e => plNodeChip(e.to)).join('')}</div>` : ''}</div>
+    <div>${shape ? `<h3>Data shape</h3>${shape}` : ''}${status || current ? `<h3>Current data</h3>${status}${current}` : ''}</div></div>`;
 }
 async function renderPipelineSelection() {
   const key = plKey(), [kind, id] = key.split('/');
@@ -1739,7 +1794,7 @@ async function renderPipelineSelection() {
     const [type, value] = element.dataset.pl.split('/');
     const e = plEdges.get(value);
     const lit = type === 'node' ? nodes.has(value) : type === 'edge' ? (edge ? value === id : node ? e.from === id || e.to === id : nodes.has(e.from) && nodes.has(e.to)) : element.dataset.pl === key;
-    element.classList.toggle('pl-dim', active && !lit);
+    element.classList.toggle('pl-dim', active && !lit && !element.closest('#plLanes'));
     element.classList.toggle('pl-lit', active && lit);
     element.setAttribute('aria-pressed', String(element.dataset.pl === key));
   }
@@ -1747,6 +1802,13 @@ async function renderPipelineSelection() {
   $('plOverview').hidden = active;
   $('plExplain').hidden = !active;
   if (!active) return;
+  if (matchMedia('(max-width: 899px)').matches) requestAnimationFrame(() => {
+    const first = node || plNodes.get(edge ? edge.from : [...nodes][0]);
+    const target = $('plDiagram').querySelector(`[data-pl="node/${first.id}"]`);
+    const box = target.getBoundingClientRect(), scroller = $('plDiagram');
+    scroller.scrollLeft += box.left - scroller.getBoundingClientRect().left - 16;
+    $('plExplain').scrollIntoView({block: 'start'});
+  });
   if (node) {
     let cached = plCache.get(id);
     $('plExplain').innerHTML = plNodeBody(node, cached?.data, node.dataset ? '<p>Loading current data…</p>' : '');
@@ -1763,11 +1825,11 @@ async function renderPipelineSelection() {
       if (plKey() === key) $('plExplain').innerHTML = plNodeBody(node, null, `<p>Current data unavailable: ${escape(error.message)}</p>`);
     }
   } else if (edge) {
-    $('plExplain').innerHTML = `<h2>${plNodeChip(edge.from)} → ${plNodeChip(edge.to)}</h2><p>${plChip(key, edge.label)}</p>${edge.do ? `<p>${escape(edge.do)}</p>` : ''}<div class="pl-cards">${['Before', 'After'].map((title, i) => { const n = plNodes.get(i ? edge.to : edge.from); return `<div class="panel" ${plAttrs(`node/${n.id}`, n.title)}><h3>${title}: ${escape(n.title)}</h3>${plShape(n)}</div>`; }).join('')}</div>`;
+    $('plExplain').innerHTML = `<h2>${plNodeChip(edge.from)} → ${plNodeChip(edge.to)}</h2><p>${plChip(key, edge.label)}</p>${edge.do ? `<p>${escape(edge.do)}</p>` : ''}<div class="pl-cards">${['Before', 'After'].map((title, i) => { const n = plNodes.get(i ? edge.to : edge.from); return `<div class="panel" ${plAttrs(`node/${n.id}`, n.title)}><h3>${title}: ${escape(n.title)}</h3>${plShape(n, true)}</div>`; }).join('')}</div>`;
   } else if (lane) {
     $('plExplain').innerHTML = `<h2>${escape(lane.title)}</h2><p>${escape(lane.text)}</p>` + [...plEdges].filter(([, e]) => nodes.has(e.from) && nodes.has(e.to)).sort((a, b) => plNodes.get(a[1].from).col - plNodes.get(b[1].from).col).map(([eid, e]) => `<p>${plChip(`edge/${eid}`, `${plNodes.get(e.from).title} → ${plNodes.get(e.to).title} · ${e.label}`)}${e.do ? `<br>${escape(e.do)}` : ''}</p>`).join('');
   } else {
-    $('plExplain').innerHTML = `<h2>${escape(col.title)}</h2><p>${escape(col.text)}</p>` + plTable(['Node', 'How often', 'Size', 'Newest data'], [...nodes].map(nid => { const n = plNodes.get(nid), data = plCache.get(nid)?.data; return [plNodeChip(nid), escape(n.sub), plStorage[n.dataset] ? size(plStorage[n.dataset].bytes) : blank, escape(data?.newest || data?.files?.[0]?.modified || plStorage[n.dataset]?.newest || blank)]; }));
+    $('plExplain').innerHTML = `<h2>${escape(col.title)}</h2><p>${escape(col.text)}</p>` + plTable(['Node', 'How often', 'Size', 'Newest data'], [...nodes].map(nid => { const n = plNodes.get(nid), data = plCache.get(nid)?.data; return [plNodeChip(nid), escape(n.sub), plStorage[n.dataset] ? size(plStorage[n.dataset].bytes) : blank, escape(plTime(data?.newest || data?.files?.[0]?.modified || plStorage[n.dataset]?.newest))]; }));
     $('plExplain').querySelectorAll('tbody tr').forEach(row => { const button = row.querySelector('[data-pl]'); row.dataset.pl = button.dataset.pl; });
   }
 }

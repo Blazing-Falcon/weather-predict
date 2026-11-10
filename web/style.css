@@ -221,9 +221,9 @@ td:has(> :is(.star,.linkbtn)){padding-block:0}
 .dg .box{fill:var(--panel);stroke:var(--line2);stroke-width:1.2}
 .dg .box.hot{stroke:var(--blue);stroke-width:1.8}
 .dg .box.new{stroke:var(--aqua);stroke-width:1.8}
-.dg text.t{font-family:var(--f-mono);font-weight:700;font-size:12.5px;fill:var(--fg0)}
+.dg text.t{font-family:var(--f-mono);font-weight:700;font-size:13px;fill:var(--fg0)}
 .dg text.s{font-family:var(--f-mono);font-size:10px;fill:var(--muted)}
-.dg text.col{font-size:10.5px;letter-spacing:.08em;fill:var(--muted)}
+.dg text.col{font-size:14px;letter-spacing:.08em;fill:var(--muted)}
 .dg .edge{fill:none;stroke:var(--gray);stroke-width:1.4}
 .dg .edge.pred{stroke:var(--blue);stroke-dasharray:5 4}
 .dg .bus{stroke:var(--gray);stroke-width:3;stroke-linecap:round}
@@ -292,3 +292,24 @@ button.chip{padding:5px 8px;background:var(--panel);border:1px solid var(--line2
 
 #plExplain table{min-width:580px}
 #plExplain td{white-space:nowrap}
+
+.dg text.col:hover,.dg text.col:focus-visible{fill:var(--yellow);text-decoration:underline}
+.dg .pl-lit .edge{stroke:var(--yellow);stroke-width:2.4}
+.dg .pl-lit .box{stroke:var(--yellow);stroke-width:2}
+.pl-detail{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:24px}
+.pl-detail>*{min-width:0}
+.pl-facts{margin:8px 0 16px}
+.pl-facts code{padding:2px 6px;background:var(--bg);border:1px solid var(--line2);border-radius:4px}
+.pl-shape{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:6px 12px;font:12px var(--f-mono)}
+.pl-shape dt,.pl-shape dd{margin:0;overflow-wrap:anywhere}
+#plExplain{scroll-margin-top:64px}
+#plExplain .pl-detail table{min-width:0}
+#plExplain .pl-detail td{white-space:normal;overflow-wrap:anywhere}
+@media(max-width:899px){.pl-detail,.pl-cards{grid-template-columns:1fr}}
+
+#plExplain .pl-sample table{min-width:580px}
+#plExplain .pl-sample td{white-space:nowrap}
+#plExplain .pl-files table{table-layout:fixed;width:100%}
+#plExplain .pl-files th:first-child{width:52%}
+#plExplain .pl-files th:nth-child(2){width:20%}
+#plExplain .pl-files td:nth-child(2){white-space:nowrap}

@@ -16,7 +16,9 @@ VIEWS = (
     "settings",
     "pipeline/node/sv_rain",
     "pipeline/edge/br_imerg~sv_rain",
-    "pipeline/lane/rain",
+    "pipeline/node/br_bmkg",
+    "pipeline/lane/forecast",
+    "pipeline/col/gold",
 )
 VIEWPORTS = ((1440, 900), (390, 844))
 
@@ -106,10 +108,49 @@ def main():
                         expect(page.locator("#plExplain")).not_to_contain_text(
                             "Loading current data"
                         )
+                    if name.startswith("pipeline"):
+                        geometry = page.evaluate("""() => {
+                            const nodes = [...document.querySelectorAll('.pl-node')];
+                            const boxes = nodes.map(node => node.querySelector('rect').getBBox());
+                            const problems = [];
+                            nodes.forEach((node, i) => {
+                                const box = boxes[i];
+                                for (const text of node.querySelectorAll('text')) {
+                                    const bounds = text.getBBox();
+                                    if (bounds.x < box.x || bounds.y < box.y
+                                        || bounds.x + bounds.width > box.x + box.width
+                                        || bounds.y + bounds.height > box.y + box.height) {
+                                        problems.push('Text overflow: ' + text.textContent);
+                                    }
+                                }
+                            });
+                            for (const path of document.querySelectorAll('.dg .edge')) {
+                                for (let distance = 1; distance < path.getTotalLength(); distance++) {
+                                    const p = path.getPointAtLength(distance);
+                                    if (boxes.some(b => p.x > b.x + 0.5 && p.x < b.x + b.width - 0.5
+                                        && p.y > b.y + 0.5 && p.y < b.y + b.height - 0.5)) {
+                                        problems.push('Edge crosses box: ' + path.getAttribute('d'));
+                                        break;
+                                    }
+                                }
+                            }
+                            return problems;
+                        }""")
+                        checks.extend(geometry)
+                        if name.startswith("pipeline/") and width < 900:
+                            expect(page.locator("#plExplain h2")).to_be_in_viewport()
+                            assert page.locator("#plExplain h2").bounding_box()["y"] >= 48
+                        page.evaluate("window.scrollTo(0, 0)")
                     page.screenshot(
                         path=shots / f"{name.replace('/', '-')}-{width}.png",
                         full_page=name.startswith("pipeline"),
                     )
+                    if name.startswith("pipeline"):
+                        page.evaluate("settings.theme = 'light'; applyTheme()")
+                        page.screenshot(
+                            path=shots / f"{name.replace('/', '-')}-light-{width}.png",
+                            full_page=True,
+                        )
                     if name == "map":
                         capture_map_states(page, shots, width)
                 except (Error, AssertionError) as error:

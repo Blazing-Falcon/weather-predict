@@ -11,7 +11,7 @@ from typer.testing import CliRunner
 
 from nowcast.cli import app
 from nowcast.registry.grids import imerg_grid
-from nowcast.sources import cmr, imerg
+from nowcast.sources import earthdata, imerg
 from nowcast.timeslots import SLOT
 from nowcast.zonal import Zonal
 
@@ -53,10 +53,36 @@ def test_cmr_search_after(monkeypatch):
         return httpx.Response(200, headers=headers, json={"feed": {"entry": entries}})
 
     monkeypatch.setattr(
-        cmr.http, "client", lambda: httpx.Client(transport=httpx.MockTransport(respond))
+        earthdata.http, "client", lambda: httpx.Client(transport=httpx.MockTransport(respond))
     )
-    assert cmr.granules("collection", START, END) == [entry, entry]
+    assert earthdata.granules("collection", START, END) == [entry, entry]
     assert next(pages, None) is None
+
+
+@pytest.mark.parametrize("failure", [503, 429, "transport"])
+def test_latest_granule_retries(monkeypatch, failure):
+    entry = {"title": V07C, "time_start": START.isoformat(), "time_end": START.isoformat()}
+    requests, delays = [], []
+
+    def respond(request):
+        requests.append(request)
+        assert request.url.params["page_size"] == "1"
+        assert request.url.params["sort_key"] == "-start_date"
+        assert request.url.params["collection_concept_id"] == "collection"
+        assert request.url.params["temporal"] == "2025-01-01T00:00:00Z,2025-02-01T00:00:00Z"
+        if len(requests) == 1:
+            if failure == "transport":
+                raise httpx.ConnectError("connection failed", request=request)
+            return httpx.Response(failure)
+        return httpx.Response(200, json={"feed": {"entry": [entry]}})
+
+    monkeypatch.setattr(
+        earthdata.http, "client", lambda: httpx.Client(transport=httpx.MockTransport(respond))
+    )
+    monkeypatch.setattr(earthdata.http.time, "sleep", delays.append)
+    assert earthdata.latest_granule("collection", START, END) == entry
+    assert len(requests) == 2
+    assert delays == [2.0]
 
 
 @pytest.fixture
@@ -168,8 +194,8 @@ def test_backfill_403_then_resume_and_skip(monkeypatch, sample, tmp_path):
         assert auth
         return httpx.Client(transport=httpx.MockTransport(respond))
 
-    monkeypatch.setattr(cmr, "granules", list_granules)
-    monkeypatch.setattr(imerg.http, "client", client)
+    monkeypatch.setattr(earthdata, "granules", list_granules)
+    monkeypatch.setattr(earthdata.http, "client", client)
     runner = CliRunner()
     command = ["imerg", "backfill", "--start", "2025-01", "--end", "2025-01"]
     result = runner.invoke(app, command)
@@ -252,8 +278,8 @@ def live(monkeypatch, sample, tmp_path):
 
     content = crop.read_bytes()
     monkeypatch.setattr(imerg, "datetime", Clock)
-    monkeypatch.setattr(cmr, "granules", list_granules)
-    monkeypatch.setattr(imerg.http, "client", lambda auth: httpx.Client(
+    monkeypatch.setattr(earthdata, "granules", list_granules)
+    monkeypatch.setattr(earthdata.http, "client", lambda auth: httpx.Client(
         transport=httpx.MockTransport(lambda request: httpx.Response(200, content=content))
     ))
     return root, cursor, previous, now, titles, searches

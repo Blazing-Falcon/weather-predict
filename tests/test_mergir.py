@@ -11,7 +11,7 @@ import pytest
 from nowcast import config
 from nowcast.cloud import CLOUD_PARTS, CloudMotion
 from nowcast.registry.grids import Grid
-from nowcast.sources import mergir
+from nowcast.sources import earthdata, mergir
 from nowcast.sources.mergir import Granule, read_crop, write_month
 from nowcast.timeslots import SLOT
 from nowcast.zonal import Zonal
@@ -107,7 +107,7 @@ def test_backfill_prefetches_next_pending_month(tmp_path, monkeypatch, download_
         if month == mar:
             march_started.set()
             if download_fails:
-                raise mergir.EarthdataForbidden("synthetic failure")
+                raise earthdata.EarthdataForbidden("synthetic failure")
         bronze.mkdir(parents=True)
         (bronze / granules[0].title).touch()
 
@@ -129,7 +129,7 @@ def test_backfill_prefetches_next_pending_month(tmp_path, monkeypatch, download_
         return stats, (last_slot, np.zeros((2, 2))) if month == jan else None
 
     monkeypatch.setattr(
-        mergir.cmr, "granules",
+        earthdata, "granules",
         lambda collection, start, end: [{"title": f"GPM_MERGIR.1:merg_{start:%Y%m%d%H}_4km-pixel.nc4"}],
     )
     monkeypatch.setattr(mergir, "download_month", download_month)
@@ -137,7 +137,7 @@ def test_backfill_prefetches_next_pending_month(tmp_path, monkeypatch, download_
     monkeypatch.setattr(mergir, "write_month", write_month)
 
     if download_fails:
-        with pytest.raises(mergir.EarthdataForbidden, match="synthetic failure"):
+        with pytest.raises(earthdata.EarthdataForbidden, match="synthetic failure"):
             mergir._backfill(jan, mar, False, state_path)
     else:
         assert list(mergir._backfill(jan, mar, False, state_path)) == ["2025-01", "2025-03"]

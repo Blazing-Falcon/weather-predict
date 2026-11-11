@@ -1,14 +1,12 @@
 import io
 import json
 import re
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from threading import Event
 from time import perf_counter
 from typing import Annotated
-from urllib.parse import quote
 
 import cv2
 import h5py
@@ -22,12 +20,11 @@ from numpy.typing import NDArray
 from nowcast import config, http, paths
 from nowcast.cloud import CLOUD_PARTS, CloudMotion, cloud_table, features, valid_tb
 from nowcast.locks import file_lock
-from nowcast.log import get_logger, redact
+from nowcast.log import command_errors, get_logger
 from nowcast.registry.grids import Grid, mergir_grid
-from nowcast.sources import cmr
-from nowcast.sources.imerg import EarthdataForbidden, _parallel
-from nowcast.storage import atomic_write, month_path, write_bytes, write_json, write_table
-from nowcast.timeslots import HOUR, SLOT, UTC_US, next_month, parse_month, slot_range
+from nowcast.sources import earthdata
+from nowcast.storage import atomic_write, month_path, write_json, write_table
+from nowcast.timeslots import HOUR, SLOT, UTC_US, month_ranges, next_month, slot_range
 from nowcast.zonal import Zonal
 
 MANIFEST_SCHEMA = pa.schema([
@@ -108,62 +105,21 @@ def read_crop(
 
 def download(client: httpx.Client, granule: Granule, bronze: Path, grid: Grid) -> int:
     path = bronze / granule.title
-    if path.is_file():
-        try:
-            read_crop(path, grid)
-        except (OSError, KeyError, ValueError):
-            pass
-        else:
-            return 0
-
     source = config.settings()["mergir"]
     lat, lon = source["lat_index"], source["lon_index"]
     constraint = f"{source['variable']}[0:1:1][{lat[0]}:1:{lat[1]}][{lon[0]}:1:{lon[1]}]"
-    url = f"{source['opendap']}{quote(granule.title, safe='')}.dap.nc4?dap4.ce="
-    response = http.get(client, url + quote(constraint, safe="/:"))
-    if response.status_code == 403:
-        raise EarthdataForbidden("Earthdata 403: EULA not accepted or token invalid")
-    response.raise_for_status()
-    content = response.content
-    read_crop(io.BytesIO(content), grid)
-    write_bytes(path, content)
-    return len(content)
+    return earthdata.download_crop(
+        client, source, granule.title, constraint, path, lambda path: read_crop(path, grid)
+    )
 
 
 def download_month(granules: list[Granule], bronze: Path, grid: Grid, parallel: int) -> None:
-    if not granules:
-        return
-    bronze.mkdir(parents=True, exist_ok=True)
-    logger = get_logger(__name__)
-    stopped = Event()
-    failed = 0
-    with http.client(auth=True) as client, ThreadPoolExecutor(max_workers=parallel) as pool:
-        first, *remaining = granules
-        download(client, first, bronze, grid)
-        read_crop(bronze / first.title, grid, verify_slot=first.slot)
-
-        def fetch(granule: Granule) -> None:
-            if stopped.is_set():
-                return
-            try:
-                download(client, granule, bronze, grid)
-            except EarthdataForbidden:
-                stopped.set()
-                raise
-
-        futures = {pool.submit(fetch, granule): granule.title for granule in remaining}
-        for completed, future in enumerate(as_completed(futures), start=2):
-            try:
-                future.result()
-            except (httpx.HTTPError, OSError, KeyError, ValueError, EarthdataForbidden) as error:
-                failed += 1
-                logger.error("MERGIR download failed for %s: %s", futures[future], redact(str(error)))
-            if completed % 100 == 0 and not stopped.is_set():
-                logger.info("MERGIR crops checked: %d/%d", completed, len(granules))
-    if stopped.is_set():
-        raise EarthdataForbidden("Earthdata 403: EULA not accepted or token invalid")
-    if failed:
-        raise RuntimeError(f"{failed} MERGIR downloads failed")
+    if granules:
+        earthdata.download_batch(
+            granules, bronze, parallel, "MERGIR",
+            lambda client, granule: download(client, granule, bronze, grid),
+            verify_first=lambda granule: read_crop(bronze / granule.title, grid, verify_slot=granule.slot),
+        )
 
 
 def write_month(
@@ -238,7 +194,7 @@ def _previous_frame(
                 return target, saved["tb"]
     last_hour = month - HOUR
     collection = config.settings()["mergir"]["collection"]
-    entries = cmr.granules(collection, last_hour, month - timedelta(seconds=1))
+    entries = earthdata.granules(collection, last_hour, month - timedelta(seconds=1))
     granules = select_granules(entries, last_hour, month)
     if not granules:
         return None
@@ -250,101 +206,118 @@ def _previous_frame(
     return target, tb[1]
 
 
+def _fetch_month(month: datetime, following: datetime, grid: Grid, parallel: int) -> list[Granule]:
+    bronze = month_path(paths.zone("bronze") / "mergir", month)
+    entries = earthdata.granules(
+        config.settings()["mergir"]["collection"], month, following - timedelta(seconds=1)
+    )
+    granules = select_granules(entries, month, following)
+    get_logger(__name__).info("MERGIR %s listed %d hourly files, NASA parallelism=%d",
+                              month.strftime("%Y-%m"), len(granules), parallel)
+    download_month(granules, bronze, grid, parallel)
+    return granules
+
+
+def _publish_backfill_month(
+    month: datetime, granules: list[Granule], state_path: Path, grid: Grid,
+    zonal: Zonal, motion: CloudMotion, previous: tuple[datetime, NDArray] | None,
+) -> dict:
+    bronze = month_path(paths.zone("bronze") / "mergir", month)
+    silver = month_path(paths.zone("silver") / "cloud_kabkota", month)
+    stats, last = write_month(granules, bronze, silver, grid, zonal, motion, previous)
+    if last is not None:
+        slot, tb = last
+        with atomic_write(state_path.with_name("mergir_last_frame.npz")) as file:
+            np.savez(file, tb=tb, slot=slot.isoformat())
+    return stats
+
+
+def _record_backfill_month(
+    state_path: Path, state: dict, month: datetime, granules: list[Granule],
+    stats: dict, area_count: int, download_seconds: float, processing: float, started: float,
+) -> dict:
+    label = month.strftime("%Y-%m")
+    available = {slot for g in granules for slot in (g.slot, g.slot + SLOT)}
+    expected = slot_range(month, next_month(month))
+    finished = perf_counter()
+    state[label] = {
+        "done": True,
+        **stats,
+        "expected": len(expected),
+        "missing_frames": [slot.isoformat() for slot in expected if slot not in available],
+        "download_seconds": download_seconds,
+        "processing_seconds": finished - processing,
+        "elapsed_seconds": finished - started,
+    }
+    write_json(state_path, state)
+    silver = month_path(paths.zone("silver") / "cloud_kabkota", month)
+    manifest = pq.ParquetFile(silver / "_manifest-mergir.parquet").read(columns=["bytes"])
+    report = {
+        "slots": stats["frames"], "bronze_bytes": sum(manifest["bytes"].to_pylist()),
+        "rows": stats["frames"] * area_count, "silver_bytes": stats["silver_bytes"],
+    }
+    get_logger(__name__).info(
+        "MERGIR %s frames=%d/%d cold_speed_kmh_median=%s "
+        "download=%.2fs processing=%.2fs elapsed=%.2fs",
+        label, stats["frames"], len(expected), stats["cold_speed_kmh_median"],
+        download_seconds, finished - processing, finished - started,
+    )
+    return report
+
+
+def _cloud_processors(grid: Grid) -> tuple[Zonal, CloudMotion]:
+    membership = pq.read_table(paths.zone("ref") / "mergir_membership.parquet")
+    zonal = Zonal(membership, grid.width * grid.height)
+    cv2.setNumThreads(1)
+    motion = CloudMotion(grid, config.settings()["mergir"]["flow"])
+    get_logger(__name__).info("MERGIR pixel size %.3f km, smoothing sigma %.2f px",
+                              motion.pixel_km, motion.sigma)
+    return zonal, motion
+
+
 def _backfill(start: datetime, end: datetime, force: bool, state_path: Path) -> dict:
     state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else {}
     carry = state_path.with_name("mergir_last_frame.npz")
     logger = get_logger(__name__)
-    source = config.settings()["mergir"]
     grid = mergir_grid()
-    parallel = _parallel()
+    parallel = earthdata.parallel_requests()
     zonal = motion = None
     reports = {}
-    months = []
-    month = start
-    while month <= end:
-        following = next_month(month)
-        months.append((month, following))
-        month = following
+    months = list(month_ranges(start, next_month(end)))
     pending = (
-        (month, following)
-        for month, following in months
+        (month, following) for month, following in months
         if force or not state.get(f"{month:%Y-%m}", {}).get("done")
     )
-
-    def fetch_month(month, following):
-        label = f"{month:%Y-%m}"
-        bronze = month_path(paths.zone("bronze") / "mergir", month)
-        entries = cmr.granules(source["collection"], month, following - timedelta(seconds=1))
-        granules = select_granules(entries, month, following)
-        logger.info("MERGIR %s listed %d hourly files, NASA parallelism=%d",
-                    label, len(granules), parallel)
-        download_month(granules, bronze, grid, parallel)
-        return granules
-
     with ThreadPoolExecutor(max_workers=1) as pool:
         download_future = None
-        for month, following in months:
-            label = f"{month:%Y-%m}"
-            partition = month_path(Path(), month)
-            bronze = paths.zone("bronze") / "mergir" / partition
-            silver = paths.zone("silver") / "cloud_kabkota" / partition
-            if state.get(label, {}).get("done") and not force:
-                logger.info("MERGIR %s already done, skipping", label)
-            else:
-                started = perf_counter()
-                if zonal is None:
-                    membership = pq.read_table(paths.zone("ref") / "mergir_membership.parquet")
-                    zonal = Zonal(membership, grid.width * grid.height)
-                    cv2.setNumThreads(1)
-                    motion = CloudMotion(grid, source["flow"])
-                    logger.info("MERGIR pixel size %.3f km, smoothing sigma %.2f px",
-                                motion.pixel_km, motion.sigma)
-                if label in state:
-                    del state[label]
-                    write_json(state_path, state)
-                waiting = perf_counter()
-                if download_future is None:
-                    download_future = pool.submit(fetch_month, *next(pending))
-                granules = download_future.result()
-                download_seconds = perf_counter() - waiting
-                previous = _previous_frame(month, carry, bronze, grid) if granules else None
-                # The carry fallback can download a crop, so resolve it before prefetching.
-                next_pending = next(pending, None)
-                download_future = pool.submit(fetch_month, *next_pending) if next_pending else None
-                processing = perf_counter()
-                logger.info("MERGIR %s download wait %.2fs, processing %d frames",
-                            label, download_seconds, 2 * len(granules))
-                stats, last = write_month(granules, bronze, silver, grid, zonal, motion, previous)
-                if last is not None:
-                    slot, tb = last
-                    with atomic_write(carry) as file:
-                        np.savez(file, tb=tb, slot=slot.isoformat())
-                available = {slot for g in granules for slot in (g.slot, g.slot + SLOT)}
-                expected = slot_range(month, following)
-                finished = perf_counter()
-                state[label] = {
-                    "done": True,
-                    **stats,
-                    "expected": len(expected),
-                    "missing_frames": [slot.isoformat() for slot in expected if slot not in available],
-                    "download_seconds": download_seconds,
-                    "processing_seconds": finished - processing,
-                    "elapsed_seconds": finished - started,
-                }
+        for month, following in earthdata.archive_months(months, state, force, "MERGIR"):
+            label = month.strftime("%Y-%m")
+            bronze = month_path(paths.zone("bronze") / "mergir", month)
+            started = perf_counter()
+            if zonal is None:
+                zonal, motion = _cloud_processors(grid)
+            if label in state:
+                del state[label]
                 write_json(state_path, state)
-                manifest = pq.ParquetFile(silver / "_manifest-mergir.parquet").read(columns=["bytes"])
-                reports[label] = {
-                    "slots": stats["frames"], "bronze_bytes": sum(manifest["bytes"].to_pylist()),
-                    "rows": stats["frames"] * len(zonal.area_ids), "silver_bytes": stats["silver_bytes"],
-                }
-                logger.info(
-                    "MERGIR %s frames=%d/%d cold_speed_kmh_median=%s "
-                    "download=%.2fs processing=%.2fs elapsed=%.2fs",
-                    label, stats["frames"], len(expected), stats["cold_speed_kmh_median"],
-                    download_seconds, finished - processing, finished - started,
-                )
-            for crop in bronze.glob("*.nc4*"):
-                crop.unlink()
+            waiting = perf_counter()
+            if download_future is None:
+                download_future = pool.submit(_fetch_month, *next(pending), grid, parallel)
+            granules = download_future.result()
+            download_seconds = perf_counter() - waiting
+            previous = _previous_frame(month, carry, bronze, grid) if granules else None
+            # The carry fallback can download a crop, so resolve it before prefetching.
+            next_pending = next(pending, None)
+            download_future = (
+                pool.submit(_fetch_month, *next_pending, grid, parallel) if next_pending else None
+            )
+            processing = perf_counter()
+            logger.info("MERGIR %s download wait %.2fs, processing %d frames",
+                        label, download_seconds, 2 * len(granules))
+            stats = _publish_backfill_month(month, granules, state_path, grid, zonal, motion, previous)
+            reports[label] = _record_backfill_month(
+                state_path, state, month, granules, stats, len(zonal.area_ids),
+                download_seconds, processing, started,
+            )
     return reports
 
 
@@ -353,28 +326,17 @@ def backfill(
     end: Annotated[str, typer.Option(help="Last UTC month (YYYY-MM), inclusive.")],
     force: Annotated[bool, typer.Option(help="Process completed months again.")] = False,
 ) -> dict:
-    try:
-        if not all(re.fullmatch(r"[0-9]{4}-[0-9]{2}", month) for month in (start, end)):
-            raise ValueError("Month bounds must use YYYY-MM")
-        first = parse_month(start)
-        last = parse_month(end)
-        if first > last:
-            raise ValueError("--start must be on or before --end")
+    with command_errors(OSError, KeyError, ValueError, RuntimeError, httpx.HTTPError):
+        first, last = earthdata.month_bounds(start, end)
         state = paths.zone("state")
         state.mkdir(parents=True, exist_ok=True)
         with file_lock(state, "mergir.lock"):
             return _backfill(first, last, force, state / "mergir_backfill.json")
-    except (OSError, KeyError, ValueError, RuntimeError, httpx.HTTPError) as error:
-        typer.echo(redact(str(error)), err=True)
-        raise typer.Exit(1) from None
 
 
 def gaps(month: Annotated[str, typer.Option(help="UTC month (YYYY-MM).")]) -> None:
-    try:
-        if not re.fullmatch(r"[0-9]{4}-[0-9]{2}", month):
-            raise ValueError("--month must use YYYY-MM")
-        start = parse_month(month)
-        end = next_month(start)
+    with command_errors(OSError, ValueError):
+        start = earthdata.gap_month(month)
         path = month_path(paths.zone("silver") / "cloud_kabkota", start, CLOUD_PARTS[1])
         table = pq.ParquetFile(path).read(columns=["slot"]) if path.exists() else pa.table(
             {"slot": pa.array([], type=UTC_US)}
@@ -383,33 +345,5 @@ def gaps(month: Annotated[str, typer.Option(help="UTC month (YYYY-MM).")]) -> No
             row["slot"]: row["slot_count"]
             for row in table.group_by("slot").aggregate([("slot", "count")]).to_pylist()
         }
-        if month == datetime.now(UTC).strftime("%Y-%m"):
-            end = max(counts) + SLOT if counts else start
-        expected = slot_range(start, end)
-        missing = [slot for slot in expected if slot not in counts]
-        runs = []
-        for slot in missing:
-            if runs and slot == runs[-1]["end"] + SLOT:
-                runs[-1]["end"] = slot
-                runs[-1]["slots"] += 1
-            else:
-                runs.append({"start": slot, "end": slot, "slots": 1})
-        for run in runs:
-            run["start"] = run["start"].isoformat()
-            run["end"] = run["end"].isoformat()
-        report = {
-            "month": month,
-            "expected_slots": len(expected),
-            "present_slots": len(counts),
-            "missing_slots": [slot.isoformat() for slot in missing],
-            "missing_runs": runs,
-            "rows_per_slot_min": min(counts.values(), default=None),
-            "rows_per_slot_max": max(counts.values(), default=None),
-        }
-        output = paths.zone("state") / "mergir_gaps"
-        output.mkdir(parents=True, exist_ok=True)
-        write_json(output / f"{month}.json", report)
-        typer.echo(json.dumps(report, indent=2))
-    except (OSError, ValueError) as error:
-        typer.echo(redact(str(error)), err=True)
-        raise typer.Exit(1) from None
+        report = earthdata.gap_report(month, counts, datetime.now(UTC))
+        earthdata.write_gap_report("mergir", month, report)

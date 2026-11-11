@@ -1,7 +1,10 @@
 import logging
 import re
 import time
+from contextlib import contextmanager
 from threading import Lock
+
+import typer
 
 from nowcast import config
 
@@ -41,3 +44,13 @@ def get_logger(name: str) -> logging.Logger:
     if name != "nowcast" and not name.startswith("nowcast."):
         name = f"nowcast.{name}"
     return logging.getLogger(name)
+
+
+@contextmanager
+def command_errors(*errors):
+    """Turn the given errors into a redacted message and exit code 1."""
+    try:
+        yield
+    except errors as error:
+        typer.echo(redact(str(error)), err=True)
+        raise typer.Exit(1) from None

@@ -2,7 +2,6 @@ import io
 import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from urllib.parse import quote
 
 import h5py
 import httpx
@@ -11,6 +10,7 @@ from numpy.typing import NDArray
 
 from nowcast import config, http
 from nowcast.log import get_logger
+from nowcast.sources import earthdata
 from nowcast.storage import write_json
 
 EARTH_RADIUS_KM = 6371.0072
@@ -73,27 +73,16 @@ def mergir_grid() -> Grid:
 def fetch_mergir_grid() -> None:
     settings = config.settings()
     source = settings["mergir"]
-    with http.client(timeout=30) as client:
-        response = http.get(
-            client,
-            settings["cmr"]["granules"],
-            params={
-                "collection_concept_id": source["collection"],
-                "sort_key": "-start_date",
-                "page_size": 1,
-            },
-        ).raise_for_status()
-    entries = response.json()["feed"]["entry"]
-    if not entries:
+    entry = earthdata.latest_granule(source["collection"])
+    if entry is None:
         raise ValueError("CMR returned no MERGIR granules")
 
-    title = entries[0]["title"]
+    title = entry["title"]
     constraints = []
     for axis in ("lat", "lon"):
         first, last = source[f"{axis}_index"]
         constraints.append(f"/{axis}[{first}:1:{last}]")
-    constraint = quote(";".join(constraints), safe="/:;")
-    url = f"{source['opendap']}{quote(title, safe='')}.dap.nc4?dap4.ce={constraint}"
+    url = earthdata.dap4_url(source, title, ";".join(constraints), constraint_safe="/:;")
     try:
         with http.client(auth=True, timeout=30) as client:
             content = client.get(url).raise_for_status().content

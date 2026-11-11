@@ -66,7 +66,7 @@ def backfill(
     cloud_from: Annotated[str, typer.Option(help="Earliest cloud scan, as an ISO timestamp.")],
 ) -> None:
     """Render missing rain and cloud tiles from retained bronze data."""
-    from nowcast.sources.himawari import decode
+    from nowcast.sources.himawari import decode, parse_segment_name
     from nowcast.sources.imerg import read_crop, select_granules
 
     try:
@@ -107,9 +107,9 @@ def backfill(
     for file in (bronze / "himawari").glob(
         f"date=*/hour=*/HS_H09_*_{source['band']}_FLDK_R20_S??10.DAT.bz2"
     ):
-        scan = datetime.strptime(file.name[7:20], "%Y%m%d_%H%M").replace(tzinfo=UTC)
+        scan, segment = parse_segment_name(file.name)
         if scan >= cloud_since:
-            scans[scan][int(file.name.split("_S")[-1][:2])] = file
+            scans[scan][segment] = file
 
     for scan, files in sorted(scans.items()):
         target = tile_path(root, "cloud", scan)

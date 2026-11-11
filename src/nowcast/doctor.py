@@ -17,6 +17,7 @@ import typer
 
 from nowcast import config, http, paths
 from nowcast.log import redact
+from nowcast.sources.himawari import segment_prefix
 
 TIMEOUT = 20.0
 
@@ -131,12 +132,7 @@ def himawari(request):
     scan = now.replace(minute=now.minute // 10 * 10, second=0, microsecond=0)
     for minutes_back in range(0, 61, 10):
         candidate = scan - timedelta(minutes=minutes_back)
-        prefix = settings["prefix"].format(
-            yyyy=candidate.strftime("%Y"),
-            mm=candidate.strftime("%m"),
-            dd=candidate.strftime("%d"),
-            HHMM=candidate.strftime("%H%M"),
-        )
+        prefix = segment_prefix(candidate, settings)
         response = request(settings["bucket_url"], params={"list-type": "2", "prefix": prefix})
         if response.status_code != 200:
             return "FAIL", f"HTTP {response.status_code}"

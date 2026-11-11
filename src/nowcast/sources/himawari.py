@@ -19,7 +19,7 @@ from nowcast import config, http, paths
 from nowcast.cloud import CLOUD_PARTS, CloudMotion, cloud_rows, valid_tb
 from nowcast.gold.tiles import tile_path, write_bounds, write_cloud
 from nowcast.locks import file_lock
-from nowcast.log import get_logger, redact
+from nowcast.log import command_errors, get_logger
 from nowcast.registry.grids import Grid, imerg_grid, mergir_grid
 from nowcast.storage import atomic_write, month_path, write_bytes, write_json, write_table
 from nowcast.timeslots import SLOT, UTC_US
@@ -124,22 +124,48 @@ def decode(files: list[Path], index_path: Path, grid: Grid, source: dict) -> NDA
     return tb
 
 
-def merge_scan(path: Path, table: pa.Table, scan: datetime) -> None:
-    timestamp = "slot" if path.name == CLOUD_PARTS[2] else "scan"
-    sort_keys = [(timestamp, "ascending")]
-    if path.name == CLOUD_PARTS[2]:
-        sort_keys.insert(0, ("area_id", "ascending"))
+def segment_prefix(scan: datetime, source: dict) -> str:
+    return source["prefix"].format(
+        yyyy=f"{scan:%Y}", mm=f"{scan:%m}", dd=f"{scan:%d}", HHMM=f"{scan:%H%M}",
+    )
+
+
+def segment_name(scan: datetime, segment: int, band: str) -> str:
+    return f"HS_H09_{scan:%Y%m%d_%H%M}_{band}_FLDK_R20_S{segment:02}10.DAT.bz2"
+
+
+def segment_key(scan: datetime, segment: int, source: dict) -> str:
+    return segment_prefix(scan, source) + segment_name(scan, segment, source["band"])
+
+
+def parse_segment_name(name: str) -> tuple[datetime, int]:
+    _, _, day, clock, _, _, _, segment = name.split("_")
+    scan = datetime.strptime(f"{day}_{clock}", "%Y%m%d_%H%M").replace(tzinfo=UTC)
+    return scan, int(segment[1:3])
+
+
+def merge_features(path: Path, table: pa.Table, scan: datetime) -> None:
     if path.exists():
         existing = pq.ParquetFile(path).read()
-        replaced = pc.equal(existing[timestamp], pa.scalar(scan, type=UTC_US))
-        if path.name == CLOUD_PARTS[2]:
-            replaced = pc.and_(replaced, pc.and_(
+        replaced = pc.and_(
+            pc.equal(existing["slot"], pa.scalar(scan, type=UTC_US)),
+            pc.and_(
                 pc.is_in(existing["area_id"], value_set=table["area_id"]),
                 pc.is_in(existing["source"], value_set=table["source"]),
-            ))
+            ),
+        )
         table = pa.concat_tables([existing.filter(pc.invert(replaced)), table])
     path.parent.mkdir(parents=True, exist_ok=True)
-    write_table(table.sort_by(sort_keys), path)
+    write_table(table.sort_by([("area_id", "ascending"), ("slot", "ascending")]), path)
+
+
+def merge_manifest(path: Path, table: pa.Table, scan: datetime) -> None:
+    if path.exists():
+        existing = pq.ParquetFile(path).read()
+        replaced = pc.equal(existing["scan"], pa.scalar(scan, type=UTC_US))
+        table = pa.concat_tables([existing.filter(pc.invert(replaced)), table])
+    path.parent.mkdir(parents=True, exist_ok=True)
+    write_table(table.sort_by([("scan", "ascending")]), path)
 
 
 def _ready_scans(
@@ -151,13 +177,8 @@ def _ready_scans(
         scan = newest - offset * SCAN_LENGTH
         if scan < now - LOOKBACK or (last is not None and scan <= last):
             continue
-        prefix = source["prefix"].format(
-            yyyy=f"{scan:%Y}", mm=f"{scan:%m}", dd=f"{scan:%d}", HHMM=f"{scan:%H%M}",
-        )
-        keys = [
-            f"{prefix}HS_H09_{scan:%Y%m%d_%H%M}_{source['band']}_FLDK_R20_S{segment:02}10.DAT.bz2"
-            for segment in source["segments"]
-        ]
+        prefix = segment_prefix(scan, source)
+        keys = [segment_key(scan, segment, source) for segment in source["segments"]]
         response = http.get(client, source["bucket_url"], params={
             "list-type": "2", "prefix": prefix,
         }).raise_for_status()
@@ -186,7 +207,7 @@ def _download(
 def _prune(bronze: Path, silver: Path, cutoff: datetime, last: datetime | None) -> None:
     processed = {}
     for file in bronze.glob("date=*/hour=*/HS_H09_*_FLDK_R20_S*.DAT.bz2"):
-        scan = datetime.strptime(file.name[7:20], "%Y%m%d_%H%M").replace(tzinfo=UTC)
+        scan, _ = parse_segment_name(file.name)
         if scan >= cutoff or last is None or scan > last:
             continue
         partition = month_path(Path(), scan)
@@ -213,120 +234,164 @@ def newest_scan(now: datetime) -> datetime | None:
     return ready[-1][0] if ready else None
 
 
-def _tick(state: Path, now: datetime) -> dict:
-    source = config.settings()["himawari"]
+def _download_scan(client, pool, source: dict, bronze: Path, scan: datetime, objects: dict) -> list[Path]:
+    directory = bronze / f"date={scan:%Y-%m-%d}" / f"hour={scan:%H}"
+    directory.mkdir(parents=True, exist_ok=True)
+    downloads = [
+        pool.submit(_download, client, source["bucket_url"], key, size, directory)
+        for key, size in objects.items()
+    ]
+    return [download.result() for download in downloads]
+
+
+def _load_frame(path: Path) -> tuple[datetime, NDArray] | None:
+    if path.exists():
+        with np.load(path) as frame:
+            return datetime.fromisoformat(frame["slot"].item()), frame["tb"]
+    return None
+
+
+def _scan_frame(files, state: Path, scan: datetime, previous, grid: Grid, source: dict):
+    # A saved frame for this scan means its feature rows were already published.
+    saved = previous is not None and previous[0] == scan
+    tb = previous[1] if saved else decode(files, state / "himawari_index.npz", grid, source)
+    return tb, saved
+
+
+def _publish_features(state, partition, scan, tb, previous, zonal, motion, settings) -> dict:
+    rows = cloud_rows(scan, tb, previous, zonal, motion, settings["cold_k"])
+    target = partition / CLOUD_PARTS[2]
+    merge_features(target, rows, scan)
+    with atomic_write(state / "himawari_last_frame.npz") as file:
+        np.savez(file, tb=tb, slot=scan.isoformat())
+    return {"rows": rows.num_rows, "silver_bytes": target.stat().st_size}
+
+
+def _record_manifest(partition: Path, scan: datetime, files: list[Path]) -> int:
+    stats = [file.stat() for file in files]
+    size = sum(stat.st_size for stat in stats)
+    manifest = pa.Table.from_pylist([{
+        "scan": scan,
+        "files": [file.name for file in files],
+        "fetched_at": datetime.fromtimestamp(max(stat.st_mtime for stat in stats), UTC),
+        "bytes": size,
+    }], schema=MANIFEST_SCHEMA)
+    merge_manifest(partition / MANIFEST, manifest, scan)
+    return size
+
+
+def _last_latency_record(path: Path) -> dict | None:
+    if path.exists():
+        with path.open("rb") as log:
+            log.seek(-min(path.stat().st_size, 4096), 2)
+            lines = log.read().splitlines()
+            if lines:
+                return json.loads(lines[-1])
+    return None
+
+
+def _record_latency(path: Path, scan: datetime, ready_at: datetime, last_record: dict | None) -> float:
+    latency = (ready_at - scan).total_seconds() / 60
+    if last_record is not None and last_record["scan"] == scan.isoformat():
+        latency = last_record["latency_min"]
+    else:
+        with path.open("a", encoding="utf-8") as log:
+            log.write(json.dumps({
+                "scan": scan.isoformat(), "ready_at": ready_at.isoformat(),
+                "latency_min": latency, "model_slot": is_model_slot(scan),
+            }) + "\n")
+    get_logger(__name__).info(
+        "Himawari scan %s latency_min=%.2f model_slot=%s",
+        scan.isoformat(), latency, is_model_slot(scan),
+    )
+    return latency
+
+
+def _advance_cursor(state: Path, scan: datetime, latency: float) -> None:
+    write_json(state / "himawari_live.json", {
+        "last_scan": scan.isoformat(), "latency_min_last": latency,
+    })
+
+
+def _publish_scans(state: Path, client, pool, ready: list, source: dict, last_record: dict | None) -> dict:
     bronze = paths.zone("bronze") / "himawari"
     silver = paths.zone("silver") / "cloud_kabkota"
     tiles = paths.zone("gold") / "tiles"
-    cursor_path = state / "himawari_live.json"
-    frame_path = state / "himawari_last_frame.npz"
     latency_path = state / "himawari_latency.jsonl"
-    cursor = _live_cursor(state)
-    last = datetime.fromisoformat(cursor["last_scan"]) if cursor else None
-    last_latency = cursor.get("latency_min_last")
-    last_record = None
-    if latency_path.exists():
-        with latency_path.open("rb") as log:
-            log.seek(-min(latency_path.stat().st_size, 4096), 2)
-            lines = log.read().splitlines()
-            if lines:
-                last_record = json.loads(lines[-1])
-
-    logger = get_logger(__name__)
-    zonal = None
-    previous = None
+    grid = mergir_grid()
+    write_bounds(tiles, imerg_grid(), grid)
+    zonal = previous = None
     reports = {}
-    with http.client(timeout=15) as client, ThreadPoolExecutor(max_workers=3) as pool:
-        ready = _ready_scans(client, now, last, source)
-        if ready:
-            grid = mergir_grid()
-            write_bounds(tiles, imerg_grid(), grid)
-        for scan, ready_at, objects in ready:
-            report = reports.setdefault(scan.strftime("%Y-%m"), {
-                "slots": 0, "bronze_bytes": 0, "rows": 0, "silver_bytes": 0,
-            })
-            directory = bronze / f"date={scan:%Y-%m-%d}" / f"hour={scan:%H}"
-            directory.mkdir(parents=True, exist_ok=True)
-            downloads = [
-                pool.submit(_download, client, source["bucket_url"], key, size, directory)
-                for key, size in objects.items()
-            ]
-            files = [download.result() for download in downloads]
-            partition = month_path(silver, scan)
-            model_slot = is_model_slot(scan)
-            if model_slot and zonal is None:
-                settings = config.settings()["mergir"]
-                membership = pq.read_table(paths.zone("ref") / "mergir_membership.parquet")
-                zonal = Zonal(membership, grid.width * grid.height)
-                motion = CloudMotion(grid, settings["flow"])
-                if frame_path.exists():
-                    with np.load(frame_path) as frame:
-                        previous = datetime.fromisoformat(frame["slot"].item()), frame["tb"]
-            # A saved frame for this scan means its feature rows were already published.
-            saved = previous is not None and previous[0] == scan
-            tb = previous[1] if saved else decode(files, state / "himawari_index.npz", grid, source)
-            write_cloud(tile_path(tiles, "cloud", scan), tb)
-            if model_slot and not saved:
-                rows = cloud_rows(scan, tb, previous, zonal, motion, settings["cold_k"])
-                merge_scan(partition / CLOUD_PARTS[2], rows, scan)
-                report["rows"] += rows.num_rows
-                report["silver_bytes"] = (partition / CLOUD_PARTS[2]).stat().st_size
-                with atomic_write(frame_path) as file:
-                    np.savez(file, tb=tb, slot=scan.isoformat())
-                previous = scan, tb
-
-            stats = [file.stat() for file in files]
-            size = sum(stat.st_size for stat in stats)
-            manifest = pa.Table.from_pylist([{
-                "scan": scan,
-                "files": [file.name for file in files],
-                "fetched_at": datetime.fromtimestamp(max(stat.st_mtime for stat in stats), UTC),
-                "bytes": size,
-            }], schema=MANIFEST_SCHEMA)
-            merge_scan(partition / MANIFEST, manifest, scan)
-            last_latency = (ready_at - scan).total_seconds() / 60
-            if last_record is not None and last_record["scan"] == scan.isoformat():
-                last_latency = last_record["latency_min"]
-            else:
-                with latency_path.open("a", encoding="utf-8") as log:
-                    log.write(json.dumps({
-                        "scan": scan.isoformat(), "ready_at": ready_at.isoformat(),
-                        "latency_min": last_latency, "model_slot": model_slot,
-                    }) + "\n")
-            logger.info(
-                "Himawari scan %s latency_min=%.2f model_slot=%s",
-                scan.isoformat(), last_latency, model_slot,
+    for scan, ready_at, objects in ready:
+        report = reports.setdefault(scan.strftime("%Y-%m"), {
+            "slots": 0, "bronze_bytes": 0, "rows": 0, "silver_bytes": 0,
+        })
+        files = _download_scan(client, pool, source, bronze, scan, objects)
+        partition = month_path(silver, scan)
+        model_slot = is_model_slot(scan)
+        if model_slot and zonal is None:
+            settings = config.settings()["mergir"]
+            membership = pq.read_table(paths.zone("ref") / "mergir_membership.parquet")
+            zonal = Zonal(membership, grid.width * grid.height)
+            motion = CloudMotion(grid, settings["flow"])
+            previous = _load_frame(state / "himawari_last_frame.npz")
+        tb, saved = _scan_frame(files, state, scan, previous, grid, source)
+        write_cloud(tile_path(tiles, "cloud", scan), tb)
+        if model_slot and not saved:
+            published = _publish_features(
+                state, partition, scan, tb, previous, zonal, motion, settings,
             )
-            write_json(cursor_path, {
-                "last_scan": scan.isoformat(), "latency_min_last": last_latency,
-            })
-            last = scan
-            report["slots"] += 1
-            report["bronze_bytes"] += size
-            report["latency_min"] = last_latency
+            report["rows"] += published["rows"]
+            report["silver_bytes"] = published["silver_bytes"]
+            previous = scan, tb
+        size = _record_manifest(partition, scan, files)
+        latency = _record_latency(latency_path, scan, ready_at, last_record)
+        _advance_cursor(state, scan, latency)
+        report["slots"] += 1
+        report["bronze_bytes"] += size
+        report["latency_min"] = latency
+    return reports
 
-    _prune(bronze, silver, now - RETENTION, last)
+
+def _write_health(state: Path, now: datetime, last: datetime | None, latency, count: int) -> None:
     health = state / "health"
     health.mkdir(exist_ok=True)
     write_json(health / "himawari.json", {
         "last_tick": now.isoformat(), "last_scan": last.isoformat() if last else None,
-        "latency_min_last": last_latency, "scans_processed": len(ready),
+        "latency_min_last": latency, "scans_processed": count,
     })
-    logger.info("Himawari tick scans_processed=%d", len(ready))
+    get_logger(__name__).info("Himawari tick scans_processed=%d", count)
+
+
+def _tick(state: Path, now: datetime) -> dict:
+    cursor = _live_cursor(state)
+    last = datetime.fromisoformat(cursor["last_scan"]) if cursor else None
+    latency = cursor.get("latency_min_last")
+    source = config.settings()["himawari"]
+    last_record = _last_latency_record(state / "himawari_latency.jsonl")
+    reports = {}
+    with http.client(timeout=15) as client, ThreadPoolExecutor(max_workers=3) as pool:
+        ready = _ready_scans(client, now, last, source)
+        if ready:
+            reports = _publish_scans(state, client, pool, ready, source, last_record)
+            last = ready[-1][0]
+            latency = reports[last.strftime("%Y-%m")]["latency_min"]
+    _prune(
+        paths.zone("bronze") / "himawari", paths.zone("silver") / "cloud_kabkota",
+        now - RETENTION, last,
+    )
+    _write_health(state, now, last, latency, len(ready))
     return reports
 
 
 def tick() -> dict:
-    try:
+    with command_errors(OSError, ValueError, RuntimeError, httpx.HTTPError):
         state = paths.zone("state")
         state.mkdir(parents=True, exist_ok=True)
         with file_lock(state, "himawari.lock", blocking=False) as acquired:
             if not acquired:
                 return {}
             return _tick(state, datetime.now(UTC))
-    except (OSError, ValueError, RuntimeError, httpx.HTTPError) as error:
-        typer.echo(redact(str(error)), err=True)
-        raise typer.Exit(1) from None
 
 
 def fill(
@@ -354,12 +419,9 @@ def fill(
         scan += SLOT
 
     def fetch(scan: datetime) -> list[Path] | None:
-        prefix = source["prefix"].format(
-            yyyy=f"{scan:%Y}", mm=f"{scan:%m}", dd=f"{scan:%d}", HHMM=f"{scan:%H%M}",
-        )
         files = []
         for segment in source["segments"]:
-            key = f"{prefix}HS_H09_{scan:%Y%m%d_%H%M}_{source['band']}_FLDK_R20_S{segment:02}10.DAT.bz2"
+            key = segment_key(scan, segment, source)
             response = http.get(client, source["bucket_url"] + key)
             if response.status_code != 200:
                 return None
@@ -381,7 +443,7 @@ def fill(
                 rows = cloud_rows(scan, tb, previous, zonal, motion, settings["cold_k"])
                 write_cloud(tile_path(tiles, "cloud", scan), tb)
                 with file_lock(state, "himawari.lock"):
-                    merge_scan(month_path(silver, scan, CLOUD_PARTS[2]), rows, scan)
+                    merge_features(month_path(silver, scan, CLOUD_PARTS[2]), rows, scan)
                 logger.info("Himawari fill %s rows=%d", scan.isoformat(), rows.num_rows)
             previous = scan, tb
             for path in files:

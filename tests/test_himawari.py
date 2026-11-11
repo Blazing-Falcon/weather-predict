@@ -14,7 +14,7 @@ from nowcast.sources.himawari import (
     _check_coverage,
     block_mean,
     is_model_slot,
-    merge_scan,
+    merge_features,
     pixel_index,
 )
 from nowcast.storage import write_table
@@ -83,9 +83,9 @@ def test_merge_replaces_only_matching_keys(tmp_path):
     original = mergir.read_bytes()
 
     part = tmp_path / CLOUD_PARTS[2]
-    merge_scan(part, pa.Table.from_pylist([row, dict(row, area_id=2)], schema=CLOUD_SCHEMA), scan)
-    merge_scan(part, pa.Table.from_pylist([dict(row, slot=later)], schema=CLOUD_SCHEMA), later)
-    merge_scan(part, pa.Table.from_pylist([dict(row, tb_min=210)], schema=CLOUD_SCHEMA), scan)
+    merge_features(part, pa.Table.from_pylist([row, dict(row, area_id=2)], schema=CLOUD_SCHEMA), scan)
+    merge_features(part, pa.Table.from_pylist([dict(row, slot=later)], schema=CLOUD_SCHEMA), later)
+    merge_features(part, pa.Table.from_pylist([dict(row, tb_min=210)], schema=CLOUD_SCHEMA), scan)
 
     table = pq.ParquetFile(part).read()
     assert table.schema == CLOUD_SCHEMA

@@ -9,7 +9,7 @@ import pytest
 from typer.testing import CliRunner
 
 from nowcast.cli import app
-from nowcast.silver import bmkg
+from nowcast.sources.bmkg import forecast as bmkg
 
 FIXTURES = Path(__file__).parent / "fixtures"
 MALANG = "bmkg_35.73.01.1001_kota_malang.json"
@@ -54,7 +54,7 @@ def test_malang_forecast_types_and_rounding(root, caplog, monkeypatch):
     )
     archive(root, line(body))
 
-    with caplog.at_level(logging.INFO, logger=bmkg.__name__):
+    with caplog.at_level(logging.INFO, logger="nowcast.sources.bmkg.forecast"):
         assert parse().exit_code == 0
     table = pq.ParquetFile(root / SILVER).read()
     assert table.num_rows == 17
@@ -135,7 +135,7 @@ def test_skips_failed_requests_and_invalid_body(root, caplog, monkeypatch):
     error = (FIXTURES / "bmkg_error_unknown_code.json").read_text()
     archive(root, line(error), line("not JSON"), line(error, status=404))
 
-    with caplog.at_level(logging.INFO, logger=bmkg.__name__):
+    with caplog.at_level(logging.INFO, logger="nowcast.sources.bmkg.forecast"):
         assert parse().exit_code == 0
     assert "skipped bronze lines=3" in caplog.text
     assert not (root / SILVER).exists()

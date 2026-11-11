@@ -17,7 +17,7 @@ from nowcast.features.spark import spark_session
 from nowcast.model import score, scores_daily, verify
 from nowcast.registry.dim_area import SCHEMA as AREA_SCHEMA
 from nowcast.registry.neighbours import SCHEMA as EDGE_SCHEMA
-from nowcast.silver.bmkg import SCHEMA as BMKG_SCHEMA
+from nowcast.sources.bmkg.forecast import SCHEMA as BMKG_SCHEMA
 from nowcast.sources.imerg import RAIN_SCHEMA
 from nowcast.storage import month_path, read_rows
 

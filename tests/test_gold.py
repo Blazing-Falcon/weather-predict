@@ -12,8 +12,8 @@ from nowcast.gold import frames, tiles
 from nowcast.gold.gauge_check import gauge_check_report
 from nowcast.model import score
 from nowcast.registry.grids import Grid, imerg_grid
-from nowcast.silver import bmkg
 from nowcast.sources import gauges, himawari, imerg
+from nowcast.sources.bmkg import forecast as bmkg
 from nowcast.storage import month_path
 
 T = datetime(2025, 1, 2, 10, tzinfo=UTC)

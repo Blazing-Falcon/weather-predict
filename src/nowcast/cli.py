@@ -10,9 +10,9 @@ from nowcast.model import score, scores_daily, verify
 from nowcast.model.train import train
 from nowcast.registry.cli import app as registry_app
 from nowcast.retention import disk, retention
-from nowcast.silver.bmkg import parse as bmkg_parse
 from nowcast.sources import gauges
-from nowcast.sources.bmkg import tick as bmkg_tick
+from nowcast.sources.bmkg.archive import tick as bmkg_tick
+from nowcast.sources.bmkg.forecast import parse as bmkg_parse
 from nowcast.sources.himawari import fill as himawari_fill
 from nowcast.sources.himawari import tick as himawari_tick
 from nowcast.sources.imerg import backfill as imerg_backfill

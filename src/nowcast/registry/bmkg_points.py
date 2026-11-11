@@ -1,22 +1,21 @@
 import csv
 import json
-from datetime import UTC, datetime
+from datetime import datetime
 from time import monotonic, sleep
 
 import geopandas as gpd
-import httpx
 import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 import shapely
-import typer
 
 from nowcast import config, http, paths
 from nowcast.http import rate_limit
 from nowcast.log import get_logger
 from nowcast.registry.membership import admin_areas
+from nowcast.sources.bmkg.payload import analysis_date, fetch_json, request_rate
 from nowcast.storage import write_table
-from nowcast.timeslots import UTC_US, utc_now, utc_text
+from nowcast.timeslots import UTC_US, utc_now
 
 VILLAGES_URL = "https://wilayah.id/api/villages"
 NEAR_LIMIT_KM = 10
@@ -31,19 +30,6 @@ CANDIDATE_SCHEMA = pa.schema(
         ("fetched_at", UTC_US),
     ]
 )
-
-
-def fetch_json(client, url, **kwargs):
-    try:
-        response = http.get(client, url, **kwargs)
-        if response.status_code != 200:
-            return {}, response.status_code
-        payload = response.json()
-    except (httpx.RequestError, ValueError) as error:
-        return {}, type(error).__name__
-    if not isinstance(payload, dict):
-        return {}, "TypeError"
-    return payload, None
 
 
 def candidate(kecamatan, wilayah_client, bmkg_client, bmkg_url, max_tries=3):
@@ -76,27 +62,12 @@ def candidate(kecamatan, wilayah_client, bmkg_client, bmkg_url, max_tries=3):
             error = "ValueError"
             continue
 
-        analysis_date = next(
-            (
-                period["analysis_date"]
-                for point in forecast.get("data", [])
-                for group in point.get("cuaca", [])
-                for period in group
-                if period.get("analysis_date")
-            ),
-            None,
-        )
-        if analysis_date:
-            timestamp = datetime.fromisoformat(analysis_date)
-            if timestamp.tzinfo is None:
-                timestamp = timestamp.replace(tzinfo=UTC)
-            analysis_date = utc_text(timestamp)
         return record | {
             "adm4": code,
             "desa": desa,
             "lat": lat,
             "lon": lon,
-            "analysis_date": analysis_date,
+            "analysis_date": analysis_date(forecast),
         }
 
     return record | {"error": error}
@@ -104,12 +75,7 @@ def candidate(kecamatan, wilayah_client, bmkg_client, bmkg_url, max_tries=3):
 
 def sweep(limit: int | None, max_tries: int = 3) -> None:
     bmkg = config.settings()["bmkg"]
-    try:
-        rpm = int(config.env("BMKG_MAX_RPM", str(bmkg["max_rpm"])))
-        if rpm < 1:
-            raise ValueError
-    except ValueError:
-        raise typer.BadParameter("BMKG_MAX_RPM must be a positive integer.") from None
+    rpm = request_rate()
 
     geo = config.CONFIG_DIR / "geo"
     with (geo / "kabkota_codes.csv").open(encoding="utf-8", newline="") as source:
@@ -145,7 +111,7 @@ def sweep(limit: int | None, max_tries: int = 3) -> None:
                 rate_limit(1 / 5, monotonic=monotonic, sleep=sleep)
             )
             bmkg_client.event_hooks["request"].append(
-                rate_limit(60 / min(rpm, 55), monotonic=monotonic, sleep=sleep)
+                rate_limit(60 / rpm, monotonic=monotonic, sleep=sleep)
             )
 
             for processed, row in enumerate(batch, start=1):

@@ -13,7 +13,7 @@ from typer.testing import CliRunner
 
 from nowcast import http
 from nowcast.cli import app
-from nowcast.sources import bmkg
+from nowcast.sources.bmkg import archive as bmkg
 
 RUN = "2026-11-19T12:00:00Z"
 OLD_RUN = "2026-11-19T00:00:00Z"

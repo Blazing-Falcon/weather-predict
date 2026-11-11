@@ -5,10 +5,11 @@ import pyarrow.parquet as pq
 import shapely
 
 from nowcast import config, http, paths
-from nowcast.registry.bmkg_points import NEAR_LIMIT_KM, fetch_json
+from nowcast.registry.bmkg_points import NEAR_LIMIT_KM
 from nowcast.registry.boundaries import BOUNDARIES_NAME
 from nowcast.registry.dim_area import ADMIN_FIELDS
 from nowcast.registry.grids import imerg_grid, mergir_grid
+from nowcast.sources.bmkg.payload import fetch_json
 
 
 def wilayah_mismatches():

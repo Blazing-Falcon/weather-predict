@@ -36,8 +36,9 @@ from dagster import (
 from nowcast import config, paths
 from nowcast.registry import boundaries, dim_area, membership, neighbours
 from nowcast.retention import disk_usage, retention
-from nowcast.silver import bmkg as forecast
-from nowcast.sources import bmkg, gauges, himawari, imerg, mergir
+from nowcast.sources import gauges, himawari, imerg, mergir
+from nowcast.sources.bmkg import archive as bmkg
+from nowcast.sources.bmkg import forecast
 from nowcast.storage import month_path
 
 # Include the open UTC month for live data.

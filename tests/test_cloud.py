@@ -2,8 +2,7 @@ import numpy as np
 import pyarrow as pa
 
 from nowcast import config
-from nowcast.cloud.features import features, valid_tb
-from nowcast.cloud.flow import CloudMotion
+from nowcast.cloud import CloudMotion, features, valid_tb
 from nowcast.registry.grids import Grid
 from nowcast.zonal import Zonal
 

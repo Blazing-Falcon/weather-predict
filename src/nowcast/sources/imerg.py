@@ -1,12 +1,10 @@
 import io
 import json
-import os
 import re
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from fcntl import LOCK_EX, LOCK_NB, flock
 from pathlib import Path
 from threading import Event
 from time import perf_counter
@@ -24,15 +22,15 @@ from numpy.typing import NDArray
 
 from nowcast import config, http, paths
 from nowcast.gold.tiles import tile_path, write_bounds, write_rain
+from nowcast.locks import directory_lock, file_lock
 from nowcast.log import get_logger, redact
-from nowcast.parquet import write_table
 from nowcast.registry.grids import Grid, imerg_grid, mergir_grid
 from nowcast.sources import cmr
+from nowcast.storage import month_path, scaled, write_bytes, write_json, write_table
+from nowcast.timeslots import SLOT, UTC_US, next_month, parse_month, slot_range
 from nowcast.zonal import Zonal
 
-SLOT_LENGTH = timedelta(minutes=30)
 LIVE_LOOKBACK = timedelta(hours=12)
-UTC_US = pa.timestamp("us", tz="UTC")
 VERSION = pa.dictionary(pa.int8(), pa.string())
 RAIN_SCHEMA = pa.schema(
     [
@@ -127,9 +125,7 @@ def download(client: httpx.Client, title: str, path: Path, grid: Grid) -> int:
 
     content = response.content
     read_crop(io.BytesIO(content), grid)
-    temp = path.with_suffix(".nc4.tmp")
-    temp.write_bytes(content)
-    temp.replace(path)
+    write_bytes(path, content)
     return len(content)
 
 
@@ -167,13 +163,6 @@ def download_month(
         raise EarthdataForbidden("Earthdata 403: EULA not accepted or token invalid")
     if progress["failed"]:
         raise RuntimeError(f"{progress['failed']} IMERG downloads failed")
-
-
-def _scaled(values: NDArray, scale: int, dtype: type) -> pa.Array:
-    missing = np.isnan(values)
-    limits = np.iinfo(dtype)
-    numbers = np.clip(np.rint(np.where(missing, 0, values) * scale), limits.min, limits.max)
-    return pa.array(numbers.astype(dtype), mask=missing)
 
 
 def write_month(
@@ -219,9 +208,9 @@ def write_month(
         [
             timestamps.take(slot_indices),
             pa.array(np.repeat(zonal.area_ids, len(slots)), type=pa.int16()),
-            _scaled(metrics[0].ravel(), 10, np.int16),
-            _scaled(metrics[1].ravel(), 10, np.int16),
-            _scaled(metrics[2].ravel(), 100, np.uint8),
+            scaled(metrics[0].ravel(), 10, np.int16),
+            scaled(metrics[1].ravel(), 10, np.int16),
+            scaled(metrics[2].ravel(), 100, np.uint8),
             products.take(slot_indices),
         ],
         schema=RAIN_SCHEMA,
@@ -252,7 +241,6 @@ def write_month(
                 sort_keys.insert(0, ("area_id", "ascending"))
             table = pa.concat_tables([existing.filter(pc.invert(replaced)), table])
             table = table.sort_by(sort_keys)
-        (silver / f"{name}.tmp").unlink(missing_ok=True)
         write_table(table, path)
     cell_count = len(slots) * grid.width * grid.height
     return {
@@ -264,25 +252,11 @@ def write_month(
     }
 
 
-def _save_state(path: Path, state: dict) -> None:
-    temp = path.with_suffix(".json.tmp")
-    temp.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
-    temp.replace(path)
-
-
 def _parallel() -> int:
     parallel = int(config.env("NASA_PARALLEL", str(config.settings()["nasa"]["parallel"])))
     if parallel < 1:
         raise ValueError("NASA_PARALLEL must be positive")
     return min(parallel, 16)
-
-
-def _partition(month: datetime) -> Path:
-    return Path(f"year={month:%Y}") / f"month={month:%m}"
-
-
-def _slot_range(start: datetime, end: datetime) -> list[datetime]:
-    return [start + i * SLOT_LENGTH for i in range((end - start) // SLOT_LENGTH)]
 
 
 def _backfill(start: datetime, end: datetime, force: bool, state_path: Path) -> dict:
@@ -295,9 +269,9 @@ def _backfill(start: datetime, end: datetime, force: bool, state_path: Path) -> 
     reports = {}
     month = start
     while month <= end:
-        following = (month + timedelta(days=32)).replace(day=1)
+        following = next_month(month)
         label = month.strftime("%Y-%m")
-        partition = _partition(month)
+        partition = month_path(Path(), month)
         bronze = paths.zone("bronze") / "imerg" / partition
         silver = paths.zone("silver") / "rain_kabkota" / partition
         if state.get(label, {}).get("done") and not force:
@@ -318,24 +292,20 @@ def _backfill(start: datetime, end: datetime, force: bool, state_path: Path) -> 
                     zonal = Zonal(membership, grid.width * grid.height)
                 if label in state:
                     del state[label]
-                    _save_state(state_path, state)
+                    write_json(state_path, state)
                 entries = cmr.granules(
                     settings["imerg"]["collection"], month, following - timedelta(seconds=1)
                 )
                 progress["listed"] = len(entries)
                 granules = select_granules(entries, month, following)
-                expected = _slot_range(month, following)
+                expected = slot_range(month, following)
                 slots = {granule.slot for granule in granules}
                 assert slots <= set(expected)
                 if granules:
                     download_month(granules, bronze, grid, parallel, progress)
                 # The live tick and scorer lock the state directory to write or read rain.
-                directory = os.open(state_path.parent, os.O_RDONLY)
-                try:
-                    flock(directory, LOCK_EX)
+                with directory_lock(state_path.parent):
                     stats = write_month(granules, bronze, silver, grid, zonal)
-                finally:
-                    os.close(directory)
                 progress.update(stats)
                 reports[label] = {
                     "slots": len(slots), "bronze_bytes": progress["bytes"],
@@ -353,7 +323,7 @@ def _backfill(start: datetime, end: datetime, force: bool, state_path: Path) -> 
                     "silver_bytes": stats["silver_bytes"],
                     "finished_at": datetime.now(UTC).isoformat(),
                 }
-                _save_state(state_path, state)
+                write_json(state_path, state)
             finally:
                 logger.info(
                     "IMERG %s listed=%d downloaded=%d failed=%d elapsed=%.2fs "
@@ -381,14 +351,13 @@ def backfill(
     try:
         if not all(re.fullmatch(r"[0-9]{4}-[0-9]{2}", month) for month in (start, end)):
             raise ValueError("Month bounds must use YYYY-MM")
-        first = datetime.strptime(start, "%Y-%m").replace(tzinfo=UTC)
-        last = datetime.strptime(end, "%Y-%m").replace(tzinfo=UTC)
+        first = parse_month(start)
+        last = parse_month(end)
         if first > last:
             raise ValueError("--start must be on or before --end")
         state = paths.zone("state")
         state.mkdir(parents=True, exist_ok=True)
-        with (state / "imerg_backfill.lock").open("a") as lock:
-            flock(lock, LOCK_EX)
+        with file_lock(state, "imerg_backfill.lock"):
             return _backfill(first, last, force, state / "imerg_backfill.json")
     except (OSError, ValueError, RuntimeError, httpx.HTTPError) as error:
         typer.echo(redact(str(error)), err=True)
@@ -420,10 +389,10 @@ def _archived_slots(start: datetime, end: datetime) -> set[datetime]:
     slots = set()
     month = start.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     while month <= end:
-        manifest = paths.zone("silver") / "rain_kabkota" / _partition(month) / "_manifest.parquet"
+        manifest = month_path(paths.zone("silver") / "rain_kabkota", month, "_manifest.parquet")
         if manifest.exists():
             slots.update(pq.read_table(manifest, columns=["slot"])["slot"].to_pylist())
-        month = (month + timedelta(days=32)).replace(day=1)
+        month = next_month(month)
     return slots
 
 
@@ -453,7 +422,7 @@ def _tick(state: Path, now: datetime) -> dict:
         parallel = _parallel()
         months: dict[Path, list[Granule]] = {}
         for granule in granules:
-            months.setdefault(_partition(granule.slot), []).append(granule)
+            months.setdefault(month_path(Path(), granule.slot), []).append(granule)
         for partition, batch in months.items():
             bronze = paths.zone("bronze") / "imerg" / partition
             silver = paths.zone("silver") / "rain_kabkota" / partition
@@ -464,7 +433,7 @@ def _tick(state: Path, now: datetime) -> dict:
             reports[last.strftime("%Y-%m")] = {
                 "slots": len(batch), "bronze_bytes": progress["bytes"],
                 "rows": stats["rows"], "silver_bytes": stats["silver_bytes"],
-                "latency_min": (seen_at - (last + SLOT_LENGTH)).total_seconds() / 60,
+                "latency_min": (seen_at - (last + SLOT)).total_seconds() / 60,
             }
         newest = granules[-1].slot
         if last_slot:
@@ -492,7 +461,7 @@ def _tick(state: Path, now: datetime) -> dict:
                 slot = granule.slot.isoformat()
                 if (slot, granule.title) in recorded:
                     continue
-                last_latency = (seen_at - (granule.slot + SLOT_LENGTH)).total_seconds() / 60
+                last_latency = (seen_at - (granule.slot + SLOT)).total_seconds() / 60
                 log.write(json.dumps({
                     "slot": slot,
                     "title": granule.title,
@@ -505,7 +474,7 @@ def _tick(state: Path, now: datetime) -> dict:
 
     health = state / "health"
     health.mkdir(exist_ok=True)
-    _save_state(health / "imerg.json", {
+    write_json(health / "imerg.json", {
         "last_tick": now.isoformat(),
         "last_slot": last_slot,
         "new_slots": len(granules),
@@ -513,7 +482,7 @@ def _tick(state: Path, now: datetime) -> dict:
         "latency_min_p90_24h": float(np.percentile(recent, 90)) if recent else None,
     })
     if granules:
-        _save_state(cursor_path, {
+        write_json(cursor_path, {
             "last_slot": last_slot,
             "processed": cursor["processed"] + len(granules),
         })
@@ -531,7 +500,7 @@ def _fill(start: datetime, end: datetime) -> int:
                   grid.width * grid.height)
     months: dict[Path, list[Granule]] = {}
     for granule in granules:
-        months.setdefault(_partition(granule.slot), []).append(granule)
+        months.setdefault(month_path(Path(), granule.slot), []).append(granule)
     for partition, batch in months.items():
         bronze = paths.zone("bronze") / "imerg" / partition
         download_month(batch, bronze, grid, _parallel(), {"downloaded": 0, "failed": 0, "bytes": 0})
@@ -546,8 +515,7 @@ def fill(
 ) -> None:
     """Merge past slots into silver and draw their tiles, without touching the live cursor."""
     state = paths.zone("state")
-    with (state / "imerg.lock").open("a") as lock:
-        flock(lock, LOCK_EX)
+    with file_lock(state, "imerg.lock"):
         count = _fill(datetime.fromisoformat(start), datetime.fromisoformat(end))
     get_logger(__name__).info("IMERG fill slots=%d", count)
 
@@ -556,21 +524,13 @@ def tick() -> dict:
     try:
         state = paths.zone("state")
         state.mkdir(parents=True, exist_ok=True)
-        with (state / "imerg.lock").open("a") as lock:
-            try:
-                flock(lock, LOCK_EX | LOCK_NB)
-            except BlockingIOError:
+        with file_lock(state, "imerg.lock", blocking=False) as acquired:
+            if not acquired:
                 return {}
-            directory = os.open(state, os.O_RDONLY)
-            try:
-                try:
-                    # Backfill also locks the directory while it writes the same partitions.
-                    flock(directory, LOCK_EX | LOCK_NB)
-                except BlockingIOError:
+            with directory_lock(state, blocking=False) as acquired:
+                if not acquired:
                     return {}
                 return _tick(state, datetime.now(UTC))
-            finally:
-                os.close(directory)
     except (OSError, ValueError, RuntimeError, httpx.HTTPError) as error:
         typer.echo(redact(str(error)), err=True)
         raise typer.Exit(1) from None
@@ -580,9 +540,9 @@ def gaps(month: Annotated[str, typer.Option(help="UTC month (YYYY-MM).")]) -> No
     try:
         if not re.fullmatch(r"[0-9]{4}-[0-9]{2}", month):
             raise ValueError("--month must use YYYY-MM")
-        start = datetime.strptime(month, "%Y-%m").replace(tzinfo=UTC)
-        end = (start + timedelta(days=32)).replace(day=1)
-        part = paths.zone("silver") / "rain_kabkota" / _partition(start) / "part.parquet"
+        start = parse_month(month)
+        end = next_month(start)
+        part = month_path(paths.zone("silver") / "rain_kabkota", start, "part.parquet")
         table = (
             pq.ParquetFile(part).read(columns=["slot", "rain_mean_x10", "product_version"])
             if part.exists() else RAIN_SCHEMA.empty_table()
@@ -599,12 +559,12 @@ def gaps(month: Annotated[str, typer.Option(help="UTC month (YYYY-MM).")]) -> No
             rows_per_slot[row["slot"]] += row["slot_count"]
             versions[row["product_version"]] += 1
         if month == datetime.now(UTC).strftime("%Y-%m"):
-            end = max(rows_per_slot) + SLOT_LENGTH if rows_per_slot else start
-        expected = _slot_range(start, end)
+            end = max(rows_per_slot) + SLOT if rows_per_slot else start
+        expected = slot_range(start, end)
         missing = [slot for slot in expected if slot not in rows_per_slot]
         runs = []
         for slot in missing:
-            if runs and slot == runs[-1]["end"] + SLOT_LENGTH:
+            if runs and slot == runs[-1]["end"] + SLOT:
                 runs[-1]["end"] = slot
                 runs[-1]["slots"] += 1
             else:
@@ -625,7 +585,7 @@ def gaps(month: Annotated[str, typer.Option(help="UTC month (YYYY-MM).")]) -> No
         }
         output = paths.zone("state") / "imerg_gaps"
         output.mkdir(parents=True, exist_ok=True)
-        _save_state(output / f"{month}.json", report)
+        write_json(output / f"{month}.json", report)
         typer.echo(json.dumps(report, indent=2))
     except (OSError, ValueError) as error:
         typer.echo(redact(str(error)), err=True)

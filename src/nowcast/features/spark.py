@@ -1,19 +1,17 @@
-import os
 import shutil
 from contextlib import contextmanager
-from fcntl import LOCK_EX, flock
 from pathlib import Path
 
 from pyspark.sql import SparkSession
+
+from nowcast.locks import directory_lock
 
 
 @contextmanager
 def spark_session(root: Path):
     scratch = root / "tmp" / "spark"
     scratch.mkdir(parents=True, exist_ok=True)
-    lock = os.open(scratch, os.O_RDONLY | os.O_DIRECTORY)
-    try:
-        flock(lock, LOCK_EX)
+    with directory_lock(scratch):
         spark = None
         try:
             spark = (
@@ -41,5 +39,3 @@ def spark_session(root: Path):
                         shutil.rmtree(entry)
                     else:
                         entry.unlink()
-    finally:
-        os.close(lock)

@@ -2,7 +2,6 @@ import json
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
-from fcntl import LOCK_EX, LOCK_NB, flock
 from pathlib import Path
 from time import perf_counter
 from typing import Annotated
@@ -17,20 +16,18 @@ from numpy.typing import NDArray
 from pyproj import Proj
 
 from nowcast import config, http, paths
-from nowcast.cloud.features import features, valid_tb
-from nowcast.cloud.flow import CloudMotion
+from nowcast.cloud import CLOUD_PARTS, CloudMotion, cloud_rows, valid_tb
 from nowcast.gold.tiles import tile_path, write_bounds, write_cloud
+from nowcast.locks import file_lock
 from nowcast.log import get_logger, redact
-from nowcast.parquet import write_table
 from nowcast.registry.grids import Grid, imerg_grid, mergir_grid
-from nowcast.sources.imerg import SLOT_LENGTH, UTC_US, _partition, _save_state, _scaled
-from nowcast.sources.mergir import CLOUD_SCHEMA
+from nowcast.storage import atomic_write, month_path, write_bytes, write_json, write_table
+from nowcast.timeslots import SLOT, UTC_US
 from nowcast.zonal import Zonal
 
 SCAN_LENGTH = timedelta(minutes=10)
 LOOKBACK = timedelta(hours=1)
 RETENTION = timedelta(hours=6)
-PART = "part-himawari.parquet"
 MANIFEST = "_manifest-himawari.parquet"
 MANIFEST_SCHEMA = pa.schema([
     ("scan", UTC_US),
@@ -98,7 +95,7 @@ def _check_coverage(area, grid: Grid, segments: list[int]) -> None:
     )
 
 
-def _decode(files: list[Path], index_path: Path, grid: Grid, source: dict) -> NDArray:
+def decode(files: list[Path], index_path: Path, grid: Grid, source: dict) -> NDArray:
     from satpy import Scene
 
     band = source["band"]
@@ -117,9 +114,8 @@ def _decode(files: list[Path], index_path: Path, grid: Grid, source: dict) -> ND
         _check_coverage(area, grid, source["segments"])
         lon, lat = area.get_lonlats()
         index = pixel_index(lon, lat, grid)
-        temp = index_path.with_suffix(".tmp.npz")
-        np.savez(temp, shape=dataset.shape, index=index)
-        temp.replace(index_path)
+        with atomic_write(index_path) as file:
+            np.savez(file, shape=dataset.shape, index=index)
     tb = block_mean(values, index, grid)
     get_logger(__name__).info(
         "Himawari B13 regrid invalid_cell_pct=%.3f elapsed=%.2fs",
@@ -128,50 +124,21 @@ def _decode(files: list[Path], index_path: Path, grid: Grid, source: dict) -> ND
     return tb
 
 
-def cloud_rows(
-    scan: datetime, tb: NDArray, previous: tuple[datetime, NDArray] | None,
-    zonal: Zonal, motion: CloudMotion, cold_k: float,
-) -> pa.Table:
-    valid = valid_tb(tb)
-    tb_min, tb_mean, cold_pct = features(tb, valid, cold_k, zonal)
-    adv = np.full((4, len(zonal.area_ids)), np.nan)
-    if previous is not None and previous[0] == scan - SLOT_LENGTH:
-        previous_tb = previous[1]
-        previous_image = motion.image(previous_tb, valid_tb(previous_tb))
-        image = motion.image(tb, valid)
-        if previous_image is not None and image is not None:
-            adv, _ = motion.features(previous_image, image, valid & (tb < cold_k), zonal)
-    return pa.Table.from_arrays(
-        [
-            pa.array([scan] * len(zonal.area_ids), type=UTC_US),
-            pa.array(zonal.area_ids, type=pa.int16()),
-            pa.array(np.full(len(zonal.area_ids), 2, dtype=np.uint8)),
-            _scaled(tb_min, 1, np.int16),
-            _scaled(tb_mean, 10, np.int16),
-            _scaled(cold_pct, 100, np.uint8),
-            *(_scaled(share, 100, np.uint8) for share in adv[:3]),
-            _scaled(adv[3], 1, np.uint8),
-        ],
-        schema=CLOUD_SCHEMA,
-    )
-
-
 def merge_scan(path: Path, table: pa.Table, scan: datetime) -> None:
-    timestamp = "slot" if path.name == PART else "scan"
+    timestamp = "slot" if path.name == CLOUD_PARTS[2] else "scan"
     sort_keys = [(timestamp, "ascending")]
-    if path.name == PART:
+    if path.name == CLOUD_PARTS[2]:
         sort_keys.insert(0, ("area_id", "ascending"))
     if path.exists():
         existing = pq.ParquetFile(path).read()
         replaced = pc.equal(existing[timestamp], pa.scalar(scan, type=UTC_US))
-        if path.name == PART:
+        if path.name == CLOUD_PARTS[2]:
             replaced = pc.and_(replaced, pc.and_(
                 pc.is_in(existing["area_id"], value_set=table["area_id"]),
                 pc.is_in(existing["source"], value_set=table["source"]),
             ))
         table = pa.concat_tables([existing.filter(pc.invert(replaced)), table])
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.with_name(f"{path.name}.tmp").unlink(missing_ok=True)
     write_table(table.sort_by(sort_keys), path)
 
 
@@ -212,9 +179,7 @@ def _download(
     response = http.get(client, bucket + key).raise_for_status()
     if len(response.content) != size:
         raise ValueError(f"Himawari size differs from S3 listing: {key}")
-    temp = path.with_suffix(".bz2.tmp")
-    temp.write_bytes(response.content)
-    temp.replace(path)
+    write_bytes(path, response.content)
     return path
 
 
@@ -224,7 +189,7 @@ def _prune(bronze: Path, silver: Path, cutoff: datetime, last: datetime | None) 
         scan = datetime.strptime(file.name[7:20], "%Y%m%d_%H%M").replace(tzinfo=UTC)
         if scan >= cutoff or last is None or scan > last:
             continue
-        partition = _partition(scan)
+        partition = month_path(Path(), scan)
         if partition not in processed:
             manifest = silver / partition / MANIFEST
             processed[partition] = (
@@ -287,7 +252,7 @@ def _tick(state: Path, now: datetime) -> dict:
                 for key, size in objects.items()
             ]
             files = [download.result() for download in downloads]
-            partition = silver / _partition(scan)
+            partition = month_path(silver, scan)
             model_slot = is_model_slot(scan)
             if model_slot and zonal is None:
                 settings = config.settings()["mergir"]
@@ -299,16 +264,15 @@ def _tick(state: Path, now: datetime) -> dict:
                         previous = datetime.fromisoformat(frame["slot"].item()), frame["tb"]
             # A saved frame for this scan means its feature rows were already published.
             saved = previous is not None and previous[0] == scan
-            tb = previous[1] if saved else _decode(files, state / "himawari_index.npz", grid, source)
+            tb = previous[1] if saved else decode(files, state / "himawari_index.npz", grid, source)
             write_cloud(tile_path(tiles, "cloud", scan), tb)
             if model_slot and not saved:
                 rows = cloud_rows(scan, tb, previous, zonal, motion, settings["cold_k"])
-                merge_scan(partition / PART, rows, scan)
+                merge_scan(partition / CLOUD_PARTS[2], rows, scan)
                 report["rows"] += rows.num_rows
-                report["silver_bytes"] = (partition / PART).stat().st_size
-                temp = frame_path.with_suffix(".tmp.npz")
-                np.savez(temp, tb=tb, slot=scan.isoformat())
-                temp.replace(frame_path)
+                report["silver_bytes"] = (partition / CLOUD_PARTS[2]).stat().st_size
+                with atomic_write(frame_path) as file:
+                    np.savez(file, tb=tb, slot=scan.isoformat())
                 previous = scan, tb
 
             stats = [file.stat() for file in files]
@@ -333,7 +297,7 @@ def _tick(state: Path, now: datetime) -> dict:
                 "Himawari scan %s latency_min=%.2f model_slot=%s",
                 scan.isoformat(), last_latency, model_slot,
             )
-            _save_state(cursor_path, {
+            write_json(cursor_path, {
                 "last_scan": scan.isoformat(), "latency_min_last": last_latency,
             })
             last = scan
@@ -344,7 +308,7 @@ def _tick(state: Path, now: datetime) -> dict:
     _prune(bronze, silver, now - RETENTION, last)
     health = state / "health"
     health.mkdir(exist_ok=True)
-    _save_state(health / "himawari.json", {
+    write_json(health / "himawari.json", {
         "last_tick": now.isoformat(), "last_scan": last.isoformat() if last else None,
         "latency_min_last": last_latency, "scans_processed": len(ready),
     })
@@ -356,10 +320,8 @@ def tick() -> dict:
     try:
         state = paths.zone("state")
         state.mkdir(parents=True, exist_ok=True)
-        with (state / "himawari.lock").open("a") as lock:
-            try:
-                flock(lock, LOCK_EX | LOCK_NB)
-            except BlockingIOError:
+        with file_lock(state, "himawari.lock", blocking=False) as acquired:
+            if not acquired:
                 return {}
             return _tick(state, datetime.now(UTC))
     except (OSError, ValueError, RuntimeError, httpx.HTTPError) as error:
@@ -386,10 +348,10 @@ def fill(
     logger = get_logger(__name__)
     first, last = datetime.fromisoformat(start), datetime.fromisoformat(end)
     scans = []
-    scan = first - SLOT_LENGTH
+    scan = first - SLOT
     while scan <= last:
         scans.append(scan)
-        scan += SLOT_LENGTH
+        scan += SLOT
 
     def fetch(scan: datetime) -> list[Path] | None:
         prefix = source["prefix"].format(
@@ -402,7 +364,7 @@ def fill(
             if response.status_code != 200:
                 return None
             path = work / Path(key).name
-            path.write_bytes(response.content)
+            write_bytes(path, response.content)
             files.append(path)
         return files
 
@@ -414,13 +376,12 @@ def fill(
                 logger.warning("Himawari fill %s incomplete on S3, skipped", scan.isoformat())
                 previous = None
                 continue
-            tb = _decode(files, state / "himawari_index.npz", grid, source)
+            tb = decode(files, state / "himawari_index.npz", grid, source)
             if scan >= first:
                 rows = cloud_rows(scan, tb, previous, zonal, motion, settings["cold_k"])
                 write_cloud(tile_path(tiles, "cloud", scan), tb)
-                with (state / "himawari.lock").open("a") as lock:
-                    flock(lock, LOCK_EX)
-                    merge_scan(silver / _partition(scan) / PART, rows, scan)
+                with file_lock(state, "himawari.lock"):
+                    merge_scan(month_path(silver, scan, CLOUD_PARTS[2]), rows, scan)
                 logger.info("Himawari fill %s rows=%d", scan.isoformat(), rows.num_rows)
             previous = scan, tb
             for path in files:

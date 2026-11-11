@@ -1,25 +1,25 @@
 import gzip
 import json
 import math
-import os
 from collections import Counter, defaultdict
 from datetime import UTC, date, datetime
-from tempfile import NamedTemporaryFile
 from typing import Annotated
 
 import pyarrow as pa
 import typer
 
-from nowcast import parquet, paths
+from nowcast import paths, storage
 from nowcast.log import get_logger
+from nowcast.storage import atomic_write, month_path
+from nowcast.timeslots import UTC_US, parse_month
 
 SCHEMA = pa.schema(
     [
-        ("analysis_time", pa.timestamp("us", tz="UTC")),
-        ("first_seen", pa.timestamp("us", tz="UTC")),
+        ("analysis_time", UTC_US),
+        ("first_seen", UTC_US),
         ("area_id", pa.int16()),
         ("adm4", pa.string()),
-        ("valid_time", pa.timestamp("us", tz="UTC")),
+        ("valid_time", UTC_US),
         ("lead_h", pa.int16()),
         ("weather", pa.int16()),
         ("tp_x10", pa.int16()),
@@ -201,29 +201,22 @@ def parse(
                 dict(sorted(unknown_weather.items())),
             )
 
-        year, month_number = run_month.split("-")
-        target = silver / f"year={year}" / f"month={month_number}" / "part.parquet"
+        target = month_path(silver, parse_month(run_month), "part.parquet")
         target.parent.mkdir(parents=True, exist_ok=True)
         table = pa.Table.from_pylist(rows, schema=SCHEMA)
         table = table.sort_by(
             [(key, "ascending") for key in ("area_id", "analysis_time", "valid_time")]
         )
-        parquet.write_table(table, target)
+        storage.write_table(table, target)
         report["rows"] += table.num_rows
         report["bytes"] += target.stat().st_size
         for name, letters in sorted(dead_letters.items()):
             target = bronze / "_dlq" / name
             target.parent.mkdir(parents=True, exist_ok=True)
-            with NamedTemporaryFile(dir=target.parent, delete=False) as temp:
-                try:
-                    with gzip.GzipFile(filename="", fileobj=temp, mode="wb", mtime=0) as output:
-                        for letter in letters:
-                            output.write(
-                                (json.dumps(letter, ensure_ascii=False) + "\n").encode("utf-8")
-                            )
-                    temp.close()
-                    os.replace(temp.name, target)
-                except BaseException:
-                    os.unlink(temp.name)
-                    raise
+            with (
+                atomic_write(target) as file,
+                gzip.GzipFile(filename="", fileobj=file, mode="wb", mtime=0) as output,
+            ):
+                for letter in letters:
+                    output.write((json.dumps(letter, ensure_ascii=False) + "\n").encode("utf-8"))
     return report

@@ -1,4 +1,3 @@
-import json
 import re
 from calendar import monthrange
 from collections.abc import Callable
@@ -9,13 +8,13 @@ from os import stat_result
 from pathlib import Path
 from shutil import rmtree
 from stat import S_ISDIR, S_ISREG
-from tempfile import NamedTemporaryFile
 from typing import Annotated
 
 import typer
 
 from nowcast import config, paths
 from nowcast.log import get_logger
+from nowcast.storage import write_json
 
 PARTITIONS = (
     (r"run=(\d{4}-\d{2}-\d{2}T\d{2})", "%Y-%m-%dT%H", "run"),
@@ -47,19 +46,7 @@ def _partition(directory: Path) -> tuple[datetime, datetime] | None:
     return None
 
 
-def _write_health(root: Path, name: str, report: dict) -> None:
-    target = root / "state" / "health" / f"{name}.json"
-    target.parent.mkdir(parents=True, exist_ok=True)
-    with NamedTemporaryFile(
-        mode="w", encoding="utf-8", dir=target.parent, delete_on_close=False
-    ) as temp:
-        json.dump(report, temp, indent=2)
-        temp.write("\n")
-        temp.close()
-        Path(temp.name).replace(target)
-
-
-def _size(directory: Path) -> int:
+def directory_size(directory: Path) -> int:
     return sum(
         stat.st_size
         for parent, _, files in directory.walk(on_error=_raise_walk_error)
@@ -180,7 +167,7 @@ def retention(
                     reverse=True,
                 )
                 for version in versions[policy["keep_versions"] :]:
-                    delete(stats, version, _size(version), partial(rmtree, version))
+                    delete(stats, version, directory_size(version), partial(rmtree, version))
             else:
                 _expire(
                     dataset,
@@ -200,9 +187,8 @@ def retention(
         )
         results[name] = stats
 
-    _write_health(
-        root,
-        "retention",
+    write_json(
+        root / "state" / "health" / "retention.json",
         {
             "run_at": stamp.isoformat(),
             "dry_run": dry_run,
@@ -222,7 +208,7 @@ def disk(
     for name, size in sizes.items():
         typer.echo(f"{name:<{width}}  {size / 1_000_000:10.3f}")
     typer.echo(f"TOTAL {report['total_bytes'] / 1_000_000_000:.6f} GB of {report['budget_gb']:g} GB")
-    _write_health(paths.data_root(), "disk", report)
+    write_json(paths.data_root() / "state" / "health" / "disk.json", report)
     if report["budget_exceeded"]:
         typer.echo("FAIL disk budget exceeded")
         raise typer.Exit(1)

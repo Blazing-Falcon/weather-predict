@@ -246,15 +246,15 @@ def test_sweep_checkpoints_closed_chunks(setup, monkeypatch):
 
 @pytest.mark.parametrize("readable", [True, False])
 def test_resume_after_chunk_publish_before_checkpoint(setup, monkeypatch, readable):
-    save = bmkg.save_json
+    save = bmkg.write_json
 
-    def interrupt(path, data):
+    def interrupt(path, data, **options):
         if data["runs"].get(RUN, {}).get("done"):
             raise InterruptedError
-        save(path, data)
+        save(path, data, **options)
 
     with monkeypatch.context() as patch:
-        patch.setattr(bmkg, "save_json", interrupt)
+        patch.setattr(bmkg, "write_json", interrupt)
         with pytest.raises(InterruptedError):
             bmkg.tick()
     assert setup.state()["runs"][RUN]["done"] == []

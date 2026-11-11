@@ -12,6 +12,7 @@ from typer.testing import CliRunner
 from nowcast.cli import app
 from nowcast.registry.grids import imerg_grid
 from nowcast.sources import cmr, imerg
+from nowcast.timeslots import SLOT
 from nowcast.zonal import Zonal
 
 START = datetime(2025, 1, 1, tzinfo=UTC)
@@ -196,7 +197,7 @@ def test_merge_month(sample, tmp_path):
     grid, membership, crop = sample
     archive = tmp_path / "silver"
     zonal = Zonal(membership, grid.width * grid.height)
-    slots = [START + i * imerg.SLOT_LENGTH for i in range(3)]
+    slots = [START + i * SLOT for i in range(3)]
     a, b, newer_b, c = [
         imerg.Granule(slot, f"{slot:%H%M}-{version}", version)
         for slot, version in zip([slots[0], slots[1], slots[1], slots[2]],
@@ -266,7 +267,7 @@ def test_tick_month_boundary(live):
     # The slot at the cursor is missing from silver, so the lookback fetches it again.
     assert searches == [(now - imerg.LIVE_LOOKBACK, now)]
     for month, slots, month_titles in zip(
-        (1, 2), ([previous, END - imerg.SLOT_LENGTH], [END]), (titles[:2], titles[2:]), strict=True
+        (1, 2), ([previous, END - SLOT], [END]), (titles[:2], titles[2:]), strict=True
     ):
         partition = f"year=2025/month={month:02d}"
         silver = root / "silver/rain_kabkota" / partition
@@ -324,7 +325,7 @@ def test_gaps(monkeypatch, tmp_path):
     monkeypatch.setenv("DATA_ROOT", str(tmp_path))
     part = tmp_path / "silver/rain_kabkota/year=2025/month=01/part.parquet"
     part.parent.mkdir(parents=True)
-    slots = [START + i * imerg.SLOT_LENGTH for i in range(8)]
+    slots = [START + i * SLOT for i in range(8)]
     present = [slots[i] for i in (0, 2, 6, 7)]
     count = len(present) * 514
     pq.write_table(pa.table({

@@ -14,8 +14,9 @@ import typer
 from nowcast import config, http, paths
 from nowcast.http import rate_limit
 from nowcast.log import get_logger
-from nowcast.parquet import write_table
 from nowcast.registry.membership import admin_areas
+from nowcast.storage import write_table
+from nowcast.timeslots import UTC_US, utc_now, utc_text
 
 VILLAGES_URL = "https://wilayah.id/api/villages"
 NEAR_LIMIT_KM = 10
@@ -27,7 +28,7 @@ CANDIDATE_SCHEMA = pa.schema(
         ("lat", pa.float32()),
         ("lon", pa.float32()),
         ("area_id", pa.int16()),
-        ("fetched_at", pa.timestamp("us", tz="UTC")),
+        ("fetched_at", UTC_US),
     ]
 )
 
@@ -89,7 +90,7 @@ def candidate(kecamatan, wilayah_client, bmkg_client, bmkg_url, max_tries=3):
             timestamp = datetime.fromisoformat(analysis_date)
             if timestamp.tzinfo is None:
                 timestamp = timestamp.replace(tzinfo=UTC)
-            analysis_date = timestamp.astimezone(UTC).isoformat().replace("+00:00", "Z")
+            analysis_date = utc_text(timestamp)
         return record | {
             "adm4": code,
             "desa": desa,
@@ -155,7 +156,7 @@ def sweep(limit: int | None, max_tries: int = 3) -> None:
                     "kabkota_code": kabkota,
                     "area_id": area_ids[kabkota],
                     **candidate(code, wilayah_client, bmkg_client, bmkg["url"], max_tries),
-                    "fetched_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+                    "fetched_at": utc_now(),
                 }
                 history.write((json.dumps(record, ensure_ascii=False) + "\n").encode("utf-8"))
                 history.flush()

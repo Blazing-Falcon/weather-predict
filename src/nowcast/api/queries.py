@@ -13,7 +13,9 @@ import duckdb
 import pyarrow.parquet as pq
 
 from nowcast import config
-from nowcast.retention import _size, disk_usage
+from nowcast.retention import directory_size, disk_usage
+from nowcast.storage import month_path
+from nowcast.timeslots import SLOT
 
 DB = duckdb.connect(config={"threads": "2"})
 AREA_COUNT = 519
@@ -57,7 +59,7 @@ class Archive:
                 )
             else:
                 begin, end = (
-                    f"year={stamp.year:04d}/month={stamp.month:02d}" for stamp in (first, last)
+                    month_path(Path(), stamp).as_posix() for stamp in (first, last)
                 )
                 candidates = (
                     file
@@ -328,11 +330,11 @@ def area_detail(archive, area_id, area, now):
     if runs:
         slot = first.replace(minute=30 * (first.minute // 30), second=0, microsecond=0)
         if slot < first:
-            slot += timedelta(minutes=30)
+            slot += SLOT
         while slot <= last:
             forecast = weather_at(runs, slot, min(slot, now))
             bmkg.append({"slot": slot, **forecast, "rain": bmkg_rain(forecast["weather"])})
-            slot += timedelta(minutes=30)
+            slot += SLOT
     score_scope, scope_id = "area", str(area_id)
     scores = archive.scores(now, 30, score_scope, scope_id)
     if not scores and area and area["prov_code"] is not None:
@@ -685,11 +687,11 @@ def pipeline(archive, now):
         ("dagster_runs", root / "dagster" / "history"),
     ):
         if directory.is_dir() and name not in sizes:
-            sizes[name] = _size(directory)
+            sizes[name] = directory_size(directory)
             sizes["other"] -= sizes[name]
     if "dagster_compute_logs" not in sizes:
         logs = sum(
-            _size(directory) for directory in (root / "dagster" / "storage").glob("*/compute_logs")
+            directory_size(directory) for directory in (root / "dagster" / "storage").glob("*/compute_logs")
         )
         sizes["dagster_compute_logs"] = logs
         sizes["other"] -= logs

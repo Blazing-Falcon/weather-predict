@@ -1,16 +1,17 @@
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
-from fcntl import LOCK_EX, flock
 from functools import cache
 from pathlib import Path
 
 import pyarrow as pa
 
-from nowcast import config, parquet, paths
-from nowcast.features.build import LOCAL_OFFSETS
+from nowcast import config, paths, storage
+from nowcast.locks import file_lock
 from nowcast.log import get_logger
-from nowcast.model.score import HALF_HOUR, KEY, UTC_US, model_card, read_rows, read_slots
+from nowcast.model.score import KEY, model_card
 from nowcast.model.score import SCHEMA as PREDICTION_SCHEMA
+from nowcast.storage import read_rows, read_slots
+from nowcast.timeslots import LOCAL_OFFSETS, SLOT, UTC_US
 
 SCHEMA = PREDICTION_SCHEMA.append(pa.field("verified_at", UTC_US))
 for field, dtype in (
@@ -29,7 +30,7 @@ BLOCK_START = {"before": -6, "after": 0, "centred": -3}
 def bmkg_result(runs, issued_at, t, end, alignment, rain_code):
     for analysis, steps in runs:
         if steps[0]["first_seen"] <= issued_at:
-            offset = BLOCK_START[alignment] * HALF_HOUR
+            offset = BLOCK_START[alignment] * SLOT
             wet = any(
                 start < end
                 and start + timedelta(hours=3) > t
@@ -86,7 +87,7 @@ def verify_pending(root: Path) -> int:
         for row in refilled:
             row["clim_pct"] = clim_pct(row)
         if refilled:
-            parquet.write_table(pa.Table.from_pylist(previous, schema=SCHEMA), output)
+            storage.write_table(pa.Table.from_pylist(previous, schema=SCHEMA), output)
             get_logger(__name__).info("Filled climatology for %d verified rows", len(refilled))
         done = {KEY(row) for row in previous}
         pending = [row for row in read_rows(part) if KEY(row) not in done]
@@ -107,7 +108,7 @@ def verify_pending(root: Path) -> int:
         ready = []
         for row in pending:
             window = [
-                rain.get((row["t"] + i * HALF_HOUR, row["area_id"]))
+                rain.get((row["t"] + i * SLOT, row["area_id"]))
                 for i in range(2 * row["lead_h"])
             ]
             if None not in window:
@@ -128,7 +129,7 @@ def verify_pending(root: Path) -> int:
             for row in read_slots(
                 silver / "cloud_kabkota",
                 first,
-                max(row["t"] for row, _ in ready) + HALF_HOUR,
+                max(row["t"] for row, _ in ready) + SLOT,
                 ["slot", "area_id", "adv1_pct", "adv2_pct", "adv3_pct"],
                 "part-himawari.parquet",
                 [("source", "=", 2)],
@@ -165,7 +166,7 @@ def verify_pending(root: Path) -> int:
         rows = previous + new
         assert len(rows) == len({KEY(row) for row in rows}), "Duplicate verification keys"
         output.parent.mkdir(parents=True, exist_ok=True)
-        parquet.write_table(pa.Table.from_pylist(rows, schema=SCHEMA), output)
+        storage.write_table(pa.Table.from_pylist(rows, schema=SCHEMA), output)
         count += len(new)
     return count
 
@@ -175,7 +176,6 @@ def verify() -> None:
     root = paths.data_root()
     state = root / "state"
     state.mkdir(parents=True, exist_ok=True)
-    with (state / "verify.lock").open("a") as lock:
-        flock(lock, LOCK_EX)
+    with file_lock(state, "verify.lock"):
         count = verify_pending(root)
     get_logger(__name__).info("Verified %d prediction keys", count)

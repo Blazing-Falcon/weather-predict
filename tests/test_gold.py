@@ -7,12 +7,14 @@ import pyarrow.parquet as pq
 from PIL import Image
 
 from nowcast import config
+from nowcast.cloud import CLOUD_PARTS, CLOUD_SCHEMA
 from nowcast.gold import frames, tiles
 from nowcast.gold.gauge_check import gauge_check_report
 from nowcast.model import score
 from nowcast.registry.grids import Grid, imerg_grid
 from nowcast.silver import bmkg
-from nowcast.sources import gauges, himawari, imerg, mergir
+from nowcast.sources import gauges, himawari, imerg
+from nowcast.storage import month_path
 
 T = datetime(2025, 1, 2, 10, tzinfo=UTC)
 HALF = timedelta(minutes=30)
@@ -20,7 +22,7 @@ HOUR = timedelta(hours=1)
 
 
 def write(directory, rows, schema, filename="part.parquet"):
-    part = score.partition(directory, T, filename)
+    part = month_path(directory, T, filename)
     part.parent.mkdir(parents=True, exist_ok=True)
     pq.write_table(pa.Table.from_pylist(rows, schema=schema), part)
 
@@ -74,13 +76,13 @@ def test_live_cloud_tiles_include_non_model_scans(tmp_path, monkeypatch):
         lambda *_: [(scan, scan, {"segment": 0}) for scan in (T, off_slot)],
     )
     monkeypatch.setattr(himawari, "_download", lambda *_: segment)
-    monkeypatch.setattr(himawari, "_decode", decode)
+    monkeypatch.setattr(himawari, "decode", decode)
     monkeypatch.setattr(himawari, "mergir_grid", lambda: Grid("test", [100, 101], [0, 1]))
     himawari._tick(state, off_slot)
 
     assert calls == [[segment], [segment]]
     cloud = tmp_path / "silver" / "cloud_kabkota"
-    assert pq.ParquetFile(score.partition(cloud, T, himawari.PART)).read()["slot"].to_pylist() == [
+    assert pq.ParquetFile(month_path(cloud, T, CLOUD_PARTS[2])).read()["slot"].to_pylist() == [
         T
     ]
     assert sorted(path.name for path in (tmp_path / "gold" / "tiles" / "cloud").iterdir()) == [
@@ -114,7 +116,7 @@ def test_frames_rebuild_whole_dates_and_compare_bmkg_window(tmp_path, monkeypatc
                     "cold_pct": 30 if source == 1 else None,
                 },
             ],
-            mergir.CLOUD_SCHEMA,
+            CLOUD_SCHEMA,
             part,
         )
 

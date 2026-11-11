@@ -9,12 +9,13 @@ import pyarrow.parquet as pq
 import pytest
 
 from nowcast import config
+from nowcast.cloud import CLOUD_SCHEMA
 from nowcast.features import build, climatology
 from nowcast.features.spark import spark_session
 from nowcast.registry.dim_area import SCHEMA as AREA_SCHEMA
 from nowcast.registry.neighbours import SCHEMA as EDGE_SCHEMA
 from nowcast.sources.imerg import RAIN_SCHEMA
-from nowcast.sources.mergir import CLOUD_SCHEMA
+from nowcast.timeslots import date_range
 
 FIRST = datetime(2025, 1, 31, tzinfo=UTC)
 SECOND = FIRST + timedelta(days=1)
@@ -269,7 +270,7 @@ def test_build_samples_training_days_by_month(spark, silver, tmp_path, monkeypat
 
     sampling["fraction"] = 1.0
     build.build(start, end, out)
-    first, stop = build.date_range(start, end)
+    first, stop = date_range(start, end)
     assert output_days() == {
         (first + timedelta(days=i)).date().isoformat() for i in range((stop - first).days)
     }

@@ -1,10 +1,8 @@
 import csv
-import os
 import re
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
-from fcntl import LOCK_EX, flock
 from functools import partial
 from itertools import batched
 from pathlib import Path
@@ -17,9 +15,11 @@ import shapely
 import typer
 
 from nowcast import config, http, paths
+from nowcast.locks import directory_lock
 from nowcast.log import get_logger
-from nowcast.parquet import write_table
 from nowcast.registry.membership import admin_areas
+from nowcast.storage import month_path, write_bytes, write_table
+from nowcast.timeslots import UTC_US
 
 GHCNH = "https://www.ncei.noaa.gov/oa/global-historical-climatology-network/hourly"
 AWC = "https://aviationweather.gov/api/data"
@@ -39,7 +39,7 @@ SCHEMA = pa.schema(
     [
         ("station_id", pa.string()),
         ("source", pa.string()),
-        ("obs_time", pa.timestamp("us", tz="UTC")),
+        ("obs_time", UTC_US),
         ("lat", pa.float32()),
         ("lon", pa.float32()),
         ("area_id", pa.int16()),
@@ -159,18 +159,12 @@ def assign_areas(rows: list[dict]) -> None:
 
 def merge(path: Path, rows: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    directory = os.open(path.parent, os.O_RDONLY)
-    try:
-        flock(directory, LOCK_EX)
-        # A stopped writer can leave a temporary file behind before the atomic rename.
-        path.with_name(f"{path.name}.tmp").unlink(missing_ok=True)
+    with directory_lock(path.parent):
         old = pq.ParquetFile(path).read().to_pylist() if path.exists() else []
         merged = {(row["station_id"], row["obs_time"]): row for row in old}
         merged.update(((row["station_id"], row["obs_time"]), row) for row in rows)
         table = pa.Table.from_pylist(list(merged.values()), schema=SCHEMA)
         write_table(table.sort_by([("area_id", "ascending"), ("obs_time", "ascending")]), path)
-    finally:
-        os.close(directory)
 
 
 def publish(source: str, rows: list[dict], requested: int, downloaded: int) -> dict:
@@ -184,7 +178,7 @@ def publish(source: str, rows: list[dict], requested: int, downloaded: int) -> d
 
         root = paths.zone("silver") / "gauge_obs"
         for (year, month), batch in partitions.items():
-            part = root / f"year={year:04d}" / f"month={month:02d}" / f"part-{source}.parquet"
+            part = month_path(root, datetime(year, month, 1, tzinfo=UTC), f"part-{source}.parquet")
             merge(part, batch)
             reports[f"{year:04d}-{month:02d}"] = {
                 "rows": len(batch),
@@ -227,7 +221,7 @@ def stations() -> None:
         for row in metar.json()
         if row["country"] == "ID" and (row.get("icaoId") or "").startswith("W")
     }
-    (GEO / GHCNH_STATIONS).write_text("\n".join(history) + "\n", encoding="utf-8")
+    write_bytes(GEO / GHCNH_STATIONS, ("\n".join(history) + "\n").encode("utf-8"))
     with (GEO / METAR_STATIONS).open("w", encoding="utf-8", newline="") as file:
         writer = csv.writer(file, lineterminator="\n")
         writer.writerow(["icao", "name", "lat", "lon"])
@@ -245,9 +239,7 @@ def download_ghcnh(
         return None, 0
     response.raise_for_status()
     path = bronze / filename
-    temp = path.with_suffix(".tmp")
-    temp.write_bytes(response.content)
-    temp.replace(path)
+    write_bytes(path, response.content)
     return path, response.num_bytes_downloaded
 
 
@@ -263,9 +255,7 @@ def ghcnh(
     ]
     bronze = paths.zone("bronze") / "gauges" / "ghcnh" / f"date={datetime.now(UTC):%Y-%m-%d}"
     bronze.mkdir(parents=True, exist_ok=True)
-    directory = os.open(bronze, os.O_RDONLY)
-    try:
-        flock(directory, LOCK_EX)
+    with directory_lock(bronze):
         rows = []
         downloaded = failures = 0
         completed = []
@@ -294,8 +284,6 @@ def ghcnh(
                 "reports": len(rows), "bronze_bytes": downloaded,
             }
         } if month is not None else reports
-    finally:
-        os.close(directory)
 
 
 def metar() -> dict:
@@ -319,9 +307,7 @@ def metar() -> dict:
             bronze = paths.zone("bronze") / "gauges" / "metar" / f"date={fetched:%Y-%m-%d}"
             bronze.mkdir(parents=True, exist_ok=True)
             path = bronze / f"{fetched:%Y%m%dT%H%M%S.%fZ}.json"
-            temp = path.with_suffix(".tmp")
-            temp.write_bytes(response.content)
-            temp.replace(path)
+            write_bytes(path, response.content)
             downloaded += response.num_bytes_downloaded
             parsed = parse_metar(response.json())
             report = reports.setdefault(f"{fetched:%Y-%m}", {"reports": 0, "bronze_bytes": 0})

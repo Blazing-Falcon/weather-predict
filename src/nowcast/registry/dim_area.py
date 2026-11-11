@@ -6,8 +6,8 @@ import pyarrow as pa
 
 from nowcast import config, paths
 from nowcast.log import get_logger
-from nowcast.parquet import write_table
 from nowcast.registry.boundaries import BOUNDARIES_NAME
+from nowcast.storage import write_table
 
 PROVINCES = (
     (11, 21, "Sumatera", "WIB"),

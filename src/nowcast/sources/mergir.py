@@ -4,7 +4,6 @@ import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from fcntl import LOCK_EX, flock
 from pathlib import Path
 from threading import Event
 from time import perf_counter
@@ -21,38 +20,16 @@ import typer
 from numpy.typing import NDArray
 
 from nowcast import config, http, paths
-from nowcast.cloud.features import features, valid_tb
-from nowcast.cloud.flow import CloudMotion
+from nowcast.cloud import CLOUD_PARTS, CloudMotion, cloud_table, features, valid_tb
+from nowcast.locks import file_lock
 from nowcast.log import get_logger, redact
-from nowcast.parquet import write_table
 from nowcast.registry.grids import Grid, mergir_grid
 from nowcast.sources import cmr
-from nowcast.sources.imerg import (
-    SLOT_LENGTH,
-    UTC_US,
-    EarthdataForbidden,
-    _parallel,
-    _partition,
-    _save_state,
-    _scaled,
-    _slot_range,
-)
+from nowcast.sources.imerg import EarthdataForbidden, _parallel
+from nowcast.storage import atomic_write, month_path, write_bytes, write_json, write_table
+from nowcast.timeslots import HOUR, SLOT, UTC_US, next_month, parse_month, slot_range
 from nowcast.zonal import Zonal
 
-HOUR = 2 * SLOT_LENGTH
-PART = "part-mergir.parquet"
-CLOUD_SCHEMA = pa.schema([
-    ("slot", UTC_US),
-    ("area_id", pa.int16()),
-    ("source", pa.uint8()),
-    ("tb_min", pa.int16()),
-    ("tb_mean_x10", pa.int16()),
-    ("cold_pct", pa.uint8()),
-    ("adv1_pct", pa.uint8()),
-    ("adv2_pct", pa.uint8()),
-    ("adv3_pct", pa.uint8()),
-    ("flow_kmh", pa.uint8()),
-])
 MANIFEST_SCHEMA = pa.schema([
     ("name", pa.string()),
     ("fetched_at", UTC_US),
@@ -85,7 +62,7 @@ def _verify_time(file: h5py.File, slot: datetime) -> None:
         return raw.decode() if isinstance(raw, bytes) else raw
 
     dataset = file.get("time")
-    expected = [slot, slot + SLOT_LENGTH]
+    expected = [slot, slot + SLOT]
     if dataset is not None and not value(dataset.attrs.get("NAME", "")).startswith(
         "This is a netCDF dimension but not a netCDF variable."
     ):
@@ -112,7 +89,7 @@ def _verify_time(file: h5py.File, slot: datetime) -> None:
         get_logger(__name__).info("MERGIR time coverage: %s to %s", *bounds)
         if bounds != ["T", "T"]:
             begin, end = map(datetime.fromisoformat, bounds)
-            if begin == slot and slot + SLOT_LENGTH <= end <= slot + HOUR:
+            if begin == slot and slot + SLOT <= end <= slot + HOUR:
                 return
     raise ValueError(f"MERGIR time metadata disagrees with HH:00/HH:30 for {slot.isoformat()}")
 
@@ -149,9 +126,7 @@ def download(client: httpx.Client, granule: Granule, bronze: Path, grid: Grid) -
     response.raise_for_status()
     content = response.content
     read_crop(io.BytesIO(content), grid)
-    temp = path.with_suffix(".nc4.tmp")
-    temp.write_bytes(content)
-    temp.replace(path)
+    write_bytes(path, content)
     return len(content)
 
 
@@ -200,7 +175,7 @@ def write_month(
     motion: CloudMotion,
     previous: tuple[datetime, NDArray] | None = None,
 ) -> tuple[dict, tuple[datetime, NDArray] | None]:
-    slots = [slot for g in granules for slot in (g.slot, g.slot + SLOT_LENGTH)]
+    slots = [slot for g in granules for slot in (g.slot, g.slot + SLOT)]
     assert slots == sorted(set(slots)) and np.all(np.diff(zonal.area_ids.astype(int)) > 0)
     areas, frames = len(zonal.area_ids), len(slots)
     metrics = np.full((7, areas, frames), np.nan)
@@ -225,7 +200,7 @@ def write_month(
             metrics[:3, :, column] = features(tb, valid, cold_k, zonal)
             image = motion.image(tb, valid)
             if (
-                previous_slot == slot - SLOT_LENGTH
+                previous_slot == slot - SLOT
                 and previous_image is not None
                 and image is not None
             ):
@@ -238,37 +213,25 @@ def write_month(
         if (index + 1) % 100 == 0:
             get_logger(__name__).info("MERGIR frames processed: %d/%d", 2 * (index + 1), frames)
 
-    table = pa.Table.from_arrays(
-        [
-            pa.array(slots, type=UTC_US).take(np.tile(np.arange(frames, dtype=np.int32), areas)),
-            pa.array(np.repeat(zonal.area_ids, frames), type=pa.int16()),
-            pa.array(np.ones(areas * frames, dtype=np.uint8)),
-            _scaled(metrics[0].ravel(), 1, np.int16),
-            _scaled(metrics[1].ravel(), 10, np.int16),
-            *(_scaled(metric.ravel(), 100, np.uint8) for metric in metrics[2:6]),
-            _scaled(metrics[6].ravel(), 1, np.uint8),
-        ],
-        schema=CLOUD_SCHEMA,
-    )
+    table = cloud_table(slots, zonal.area_ids, 1, metrics)
     silver.mkdir(parents=True, exist_ok=True)
     for name, output in (
-        (PART, table),
+        (CLOUD_PARTS[1], table),
         ("_manifest-mergir.parquet", pa.Table.from_pylist(manifest, schema=MANIFEST_SCHEMA)),
     ):
-        (silver / f"{name}.tmp").unlink(missing_ok=True)
         write_table(output, silver / name)
     return {
         "frames": frames,
         "invalid_cell_pct": 100 * invalid / (frames * grid.width * grid.height) if frames else None,
         "cold_speed_kmh_median": float(np.median(cold_speeds)) if cold_speeds else None,
-        "silver_bytes": (silver / PART).stat().st_size,
+        "silver_bytes": (silver / CLOUD_PARTS[1]).stat().st_size,
     }, previous
 
 
 def _previous_frame(
     month: datetime, carry: Path, bronze: Path, grid: Grid
 ) -> tuple[datetime, NDArray] | None:
-    target = month - SLOT_LENGTH
+    target = month - SLOT
     if carry.exists():
         with np.load(carry) as saved:
             if datetime.fromisoformat(saved["slot"].item()) == target:
@@ -299,7 +262,7 @@ def _backfill(start: datetime, end: datetime, force: bool, state_path: Path) -> 
     months = []
     month = start
     while month <= end:
-        following = (month + timedelta(days=32)).replace(day=1)
+        following = next_month(month)
         months.append((month, following))
         month = following
     pending = (
@@ -310,7 +273,7 @@ def _backfill(start: datetime, end: datetime, force: bool, state_path: Path) -> 
 
     def fetch_month(month, following):
         label = f"{month:%Y-%m}"
-        bronze = paths.zone("bronze") / "mergir" / _partition(month)
+        bronze = month_path(paths.zone("bronze") / "mergir", month)
         entries = cmr.granules(source["collection"], month, following - timedelta(seconds=1))
         granules = select_granules(entries, month, following)
         logger.info("MERGIR %s listed %d hourly files, NASA parallelism=%d",
@@ -322,7 +285,7 @@ def _backfill(start: datetime, end: datetime, force: bool, state_path: Path) -> 
         download_future = None
         for month, following in months:
             label = f"{month:%Y-%m}"
-            partition = _partition(month)
+            partition = month_path(Path(), month)
             bronze = paths.zone("bronze") / "mergir" / partition
             silver = paths.zone("silver") / "cloud_kabkota" / partition
             if state.get(label, {}).get("done") and not force:
@@ -338,7 +301,7 @@ def _backfill(start: datetime, end: datetime, force: bool, state_path: Path) -> 
                                 motion.pixel_km, motion.sigma)
                 if label in state:
                     del state[label]
-                    _save_state(state_path, state)
+                    write_json(state_path, state)
                 waiting = perf_counter()
                 if download_future is None:
                     download_future = pool.submit(fetch_month, *next(pending))
@@ -346,20 +309,18 @@ def _backfill(start: datetime, end: datetime, force: bool, state_path: Path) -> 
                 download_seconds = perf_counter() - waiting
                 previous = _previous_frame(month, carry, bronze, grid) if granules else None
                 # The carry fallback can download a crop, so resolve it before prefetching.
-                next_month = next(pending, None)
-                download_future = pool.submit(fetch_month, *next_month) if next_month else None
+                next_pending = next(pending, None)
+                download_future = pool.submit(fetch_month, *next_pending) if next_pending else None
                 processing = perf_counter()
                 logger.info("MERGIR %s download wait %.2fs, processing %d frames",
                             label, download_seconds, 2 * len(granules))
                 stats, last = write_month(granules, bronze, silver, grid, zonal, motion, previous)
                 if last is not None:
                     slot, tb = last
-                    temp = carry.with_suffix(".tmp")
-                    with temp.open("wb") as file:
+                    with atomic_write(carry) as file:
                         np.savez(file, tb=tb, slot=slot.isoformat())
-                    temp.replace(carry)
-                available = {slot for g in granules for slot in (g.slot, g.slot + SLOT_LENGTH)}
-                expected = _slot_range(month, following)
+                available = {slot for g in granules for slot in (g.slot, g.slot + SLOT)}
+                expected = slot_range(month, following)
                 finished = perf_counter()
                 state[label] = {
                     "done": True,
@@ -370,7 +331,7 @@ def _backfill(start: datetime, end: datetime, force: bool, state_path: Path) -> 
                     "processing_seconds": finished - processing,
                     "elapsed_seconds": finished - started,
                 }
-                _save_state(state_path, state)
+                write_json(state_path, state)
                 manifest = pq.ParquetFile(silver / "_manifest-mergir.parquet").read(columns=["bytes"])
                 reports[label] = {
                     "slots": stats["frames"], "bronze_bytes": sum(manifest["bytes"].to_pylist()),
@@ -395,14 +356,13 @@ def backfill(
     try:
         if not all(re.fullmatch(r"[0-9]{4}-[0-9]{2}", month) for month in (start, end)):
             raise ValueError("Month bounds must use YYYY-MM")
-        first = datetime.strptime(start, "%Y-%m").replace(tzinfo=UTC)
-        last = datetime.strptime(end, "%Y-%m").replace(tzinfo=UTC)
+        first = parse_month(start)
+        last = parse_month(end)
         if first > last:
             raise ValueError("--start must be on or before --end")
         state = paths.zone("state")
         state.mkdir(parents=True, exist_ok=True)
-        with (state / "mergir.lock").open("a") as lock:
-            flock(lock, LOCK_EX)
+        with file_lock(state, "mergir.lock"):
             return _backfill(first, last, force, state / "mergir_backfill.json")
     except (OSError, KeyError, ValueError, RuntimeError, httpx.HTTPError) as error:
         typer.echo(redact(str(error)), err=True)
@@ -413,9 +373,9 @@ def gaps(month: Annotated[str, typer.Option(help="UTC month (YYYY-MM).")]) -> No
     try:
         if not re.fullmatch(r"[0-9]{4}-[0-9]{2}", month):
             raise ValueError("--month must use YYYY-MM")
-        start = datetime.strptime(month, "%Y-%m").replace(tzinfo=UTC)
-        end = (start + timedelta(days=32)).replace(day=1)
-        path = paths.zone("silver") / "cloud_kabkota" / _partition(start) / PART
+        start = parse_month(month)
+        end = next_month(start)
+        path = month_path(paths.zone("silver") / "cloud_kabkota", start, CLOUD_PARTS[1])
         table = pq.ParquetFile(path).read(columns=["slot"]) if path.exists() else pa.table(
             {"slot": pa.array([], type=UTC_US)}
         )
@@ -424,12 +384,12 @@ def gaps(month: Annotated[str, typer.Option(help="UTC month (YYYY-MM).")]) -> No
             for row in table.group_by("slot").aggregate([("slot", "count")]).to_pylist()
         }
         if month == datetime.now(UTC).strftime("%Y-%m"):
-            end = max(counts) + SLOT_LENGTH if counts else start
-        expected = _slot_range(start, end)
+            end = max(counts) + SLOT if counts else start
+        expected = slot_range(start, end)
         missing = [slot for slot in expected if slot not in counts]
         runs = []
         for slot in missing:
-            if runs and slot == runs[-1]["end"] + SLOT_LENGTH:
+            if runs and slot == runs[-1]["end"] + SLOT:
                 runs[-1]["end"] = slot
                 runs[-1]["slots"] += 1
             else:
@@ -448,7 +408,7 @@ def gaps(month: Annotated[str, typer.Option(help="UTC month (YYYY-MM).")]) -> No
         }
         output = paths.zone("state") / "mergir_gaps"
         output.mkdir(parents=True, exist_ok=True)
-        _save_state(output / f"{month}.json", report)
+        write_json(output / f"{month}.json", report)
         typer.echo(json.dumps(report, indent=2))
     except (OSError, ValueError) as error:
         typer.echo(redact(str(error)), err=True)

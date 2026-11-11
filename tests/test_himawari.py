@@ -8,19 +8,16 @@ import pytest
 from pyproj import CRS
 
 from nowcast import config
-from nowcast.cloud.flow import CloudMotion
-from nowcast.parquet import write_table
+from nowcast.cloud import CLOUD_PARTS, CLOUD_SCHEMA, CloudMotion, cloud_rows
 from nowcast.registry.grids import Grid, mergir_grid
 from nowcast.sources.himawari import (
-    PART,
     _check_coverage,
     block_mean,
-    cloud_rows,
     is_model_slot,
     merge_scan,
     pixel_index,
 )
-from nowcast.sources.mergir import CLOUD_SCHEMA
+from nowcast.storage import write_table
 from nowcast.zonal import Zonal
 
 
@@ -85,7 +82,7 @@ def test_merge_replaces_only_matching_keys(tmp_path):
     write_table(pa.Table.from_pylist([dict(row, source=1)], schema=CLOUD_SCHEMA), mergir)
     original = mergir.read_bytes()
 
-    part = tmp_path / PART
+    part = tmp_path / CLOUD_PARTS[2]
     merge_scan(part, pa.Table.from_pylist([row, dict(row, area_id=2)], schema=CLOUD_SCHEMA), scan)
     merge_scan(part, pa.Table.from_pylist([dict(row, slot=later)], schema=CLOUD_SCHEMA), later)
     merge_scan(part, pa.Table.from_pylist([dict(row, tb_min=210)], schema=CLOUD_SCHEMA), scan)

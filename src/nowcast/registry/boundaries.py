@@ -1,10 +1,10 @@
 import hashlib
 import json
-import os
-from datetime import UTC, datetime
 
 from nowcast import http, paths
 from nowcast.log import get_logger
+from nowcast.storage import atomic_write, write_json
+from nowcast.timeslots import utc_now
 
 BOUNDARIES_URL = (
     "https://github.com/wmgeolab/geoBoundaries/raw/9469f09/releaseData/gbOpen/IDN/ADM2/"
@@ -35,22 +35,12 @@ def download(force: bool) -> None:
         "url": BOUNDARIES_URL,
         "bytes": len(content),
         "sha256": hashlib.sha256(content).hexdigest(),
-        "fetched_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        "fetched_at": utc_now(),
     }
     output.parent.mkdir(parents=True, exist_ok=True)
     source = output.with_suffix(".source.json")
-    output_temp = output.with_suffix(".geojson.tmp")
-    source_temp = source.with_suffix(".json.tmp")
-    target = output_temp.open("xb")
-    try:
-        with target:
-            target.write(content)
-        source_temp.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
-        os.replace(source_temp, source)
-        os.replace(output_temp, output)
-    except BaseException:
-        source_temp.unlink(missing_ok=True)
-        output_temp.unlink(missing_ok=True)
-        raise
+    with atomic_write(output) as file:
+        file.write(content)
+        write_json(source, metadata)
 
     logger.info("Downloaded %s (%d bytes, %d features)", output, len(content), len(features))

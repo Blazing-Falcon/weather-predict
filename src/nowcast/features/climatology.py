@@ -11,16 +11,15 @@ from nowcast.features.build import (
     LEADS,
     RAIN_SCHEMA,
     admin_areas,
-    date_range,
     local_time,
-    month_ranges,
     read_slots,
     slot_number,
     target_columns,
 )
 from nowcast.features.spark import spark_session
 from nowcast.log import get_logger
-from nowcast.parquet import write_table
+from nowcast.storage import write_table
+from nowcast.timeslots import date_range, month_ranges
 
 
 def climatology() -> None:

@@ -11,10 +11,19 @@ from pyspark.sql import Column, DataFrame, Observation, SparkSession, Window
 from pyspark.sql import functions as F
 
 from nowcast import config, paths
+from nowcast.cloud import CLOUD_PARTS
 from nowcast.features.spark import spark_session
 from nowcast.log import get_logger
+from nowcast.storage import month_path
+from nowcast.timeslots import (
+    LOCAL_OFFSETS,
+    SLOT,
+    SLOT_SECONDS,
+    date_range,
+    month_ranges,
+    next_month,
+)
 
-SLOT_SECONDS = 30 * 60
 RAIN_SCHEMA = (
     "slot timestamp, area_id smallint, rain_mean_x10 smallint, rain_max_x10 smallint, "
     "wet_pct smallint"
@@ -24,8 +33,6 @@ CLOUD_SCHEMA = (
     "tb_mean_x10 smallint, adv1_pct smallint, adv2_pct smallint, adv3_pct smallint, flow_kmh smallint"
 )
 CLIM_KEYS = ["area_id", "month", "hour_local"]
-CLOUD_PARTS = {1: "part-mergir.parquet", 2: "part-himawari.parquet"}
-LOCAL_OFFSETS = {"WIB": 7, "WITA": 8, "WIT": 9}
 LEADS = (1, 2, 3)
 TARGETS = [f"y{lead}" for lead in LEADS]
 KEYS = ["t", "area_id", "imerg_slot", "cloud_slot"]
@@ -65,21 +72,6 @@ def available_imerg_slot(t: datetime, lag: int) -> datetime:
     return cutoff.replace(minute=cutoff.minute // 30 * 30, second=0, microsecond=0)
 
 
-def date_range(start: str, end: str) -> tuple[datetime, datetime]:
-    first, last = (datetime.strptime(day, "%Y-%m-%d").replace(tzinfo=UTC) for day in (start, end))
-    if first > last:
-        raise ValueError("Start date must be on or before end date")
-    return first, last + timedelta(days=1)
-
-
-def month_ranges(first: datetime, stop: datetime):
-    while first < stop:
-        month_start = datetime(first.year, first.month, 1, tzinfo=UTC)
-        next_month = (month_start + timedelta(days=32)).replace(day=1)
-        yield first, min(stop, next_month)
-        first = next_month
-
-
 def slot_number(time: datetime) -> int:
     return int(time.timestamp()) // SLOT_SECONDS
 
@@ -98,7 +90,7 @@ def read_slots(
     start = datetime.fromtimestamp(first * SLOT_SECONDS, UTC)
     stop = datetime.fromtimestamp((last + 1) * SLOT_SECONDS, UTC)
     files = [
-        directory / f"year={month:%Y}" / f"month={month:%m}" / part
+        month_path(directory, month, part)
         for month, _ in month_ranges(start, stop)
     ]
     files = [str(file) for file in files if file.is_file()]
@@ -107,7 +99,7 @@ def read_slots(
     return (
         spark.read.schema(schema)
         .parquet(*files)
-        .where(F.col("slot").between(start, stop - timedelta(minutes=30)))
+        .where(F.col("slot").between(start, stop - SLOT))
         .withColumn("slot", (F.unix_seconds("slot") / SLOT_SECONDS).cast("long"))
     )
 
@@ -320,11 +312,11 @@ def build(
             month_first += timedelta(seconds=advance * SLOT_SECONDS)
             if month_first >= month_stop:
                 continue
-            next_month = (month + timedelta(days=32)).replace(day=1)
+            following = next_month(month)
             day = max(month, sample_start).date()
             days = [
                 day + timedelta(days=i)
-                for i in range((min(next_month, sample_stop).date() - day).days)
+                for i in range((min(following, sample_stop).date() - day).days)
             ]
             excluded_days = set()
             if days and fraction < 1:
@@ -366,7 +358,7 @@ def build(
                 metrics[name] = metrics.get(name, 0) + value
         if not metrics:
             rows = feature_rows(
-                spark, root, areas, climatology, first, first + timedelta(minutes=30), lag, every,
+                spark, root, areas, climatology, first, first + SLOT, lag, every,
                 cloud_source,
             )
             rows.limit(0).write.parquet(str(staged))

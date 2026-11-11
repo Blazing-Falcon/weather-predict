@@ -10,9 +10,9 @@ from shapely.geometry.base import BaseGeometry
 
 from nowcast import paths
 from nowcast.log import get_logger
-from nowcast.parquet import write_table
 from nowcast.registry.boundaries import BOUNDARIES_NAME
 from nowcast.registry.grids import Grid, imerg_grid, mergir_grid
+from nowcast.storage import write_table
 
 SCHEMA = pa.schema([("area_id", pa.int16()), ("cell", pa.int32()), ("weight", pa.float32())])
 

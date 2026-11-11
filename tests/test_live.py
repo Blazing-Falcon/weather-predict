@@ -11,6 +11,7 @@ from typer.testing import CliRunner
 
 from nowcast import config
 from nowcast.cli import app
+from nowcast.cloud import CLOUD_SCHEMA
 from nowcast.features.build import available_imerg_slot
 from nowcast.features.spark import spark_session
 from nowcast.model import score, scores_daily, verify
@@ -18,7 +19,7 @@ from nowcast.registry.dim_area import SCHEMA as AREA_SCHEMA
 from nowcast.registry.neighbours import SCHEMA as EDGE_SCHEMA
 from nowcast.silver.bmkg import SCHEMA as BMKG_SCHEMA
 from nowcast.sources.imerg import RAIN_SCHEMA
-from nowcast.sources.mergir import CLOUD_SCHEMA
+from nowcast.storage import month_path, read_rows
 
 T = datetime(2025, 1, 31, 23, 30, tzinfo=UTC)
 LAG = 60
@@ -44,7 +45,7 @@ def write(path, rows, schema):
 
 def write_slots(root, name, rows, schema, filename="part.parquet"):
     for month in {row["slot"].replace(day=1) for row in rows}:
-        part = score.partition(root / "silver" / name, month, filename)
+        part = month_path(root / "silver" / name, month, filename)
         write(part, [row for row in rows if row["slot"].month == month.month], schema)
 
 
@@ -162,7 +163,7 @@ def test_score_leakage_and_first_write(root, monkeypatch):
     assert score.score_pending(root, ISSUED) == 0
     seed(cloud_rows[:2], rain_rows[:2])
     assert score.score_pending(root, ISSUED) == 2
-    part = score.partition(root / "gold" / "predictions", T)
+    part = month_path(root / "gold" / "predictions", T, "part.parquet")
     first = pq.ParquetFile(part).read()
     assert first.schema == score.SCHEMA
     assert first["prob_pct"].to_pylist() == [65, 75]
@@ -176,20 +177,20 @@ def test_score_leakage_and_first_write(root, monkeypatch):
 
 def test_verify_waits_and_keeps_the_first_result(root):
     write(
-        score.partition(root / "gold" / "predictions", T),
+        month_path(root / "gold" / "predictions", T, "part.parquet"),
         [prediction(), prediction(lead=2)],
         score.SCHEMA,
     )
     write_slots(root, "cloud_kabkota", [cloud(T, 10)], CLOUD_SCHEMA, "part-himawari.parquet")
     write_slots(root, "rain_kabkota", [rain(ANCHOR, 5), rain(T, 1), rain(T + HALF, 5)], RAIN_SCHEMA)
-    part = score.partition(root / "gold" / "verification", T)
+    part = month_path(root / "gold" / "verification", T, "part.parquet")
     assert verify.verify_pending(root) == 1
-    [first] = score.read_rows(part)
+    [first] = read_rows(part)
     assert first["observed"] is True
     assert (first["clim_pct"], first["persist_pct"], first["motion_pct"]) == (25, 100, 100)
     assert first["bmkg_rain"] is None
     assert verify.verify_pending(root) == 0
-    assert score.read_rows(part) == [first]
+    assert read_rows(part) == [first]
 
     write_slots(
         root,
@@ -198,7 +199,7 @@ def test_verify_waits_and_keeps_the_first_result(root):
         RAIN_SCHEMA,
     )
     assert verify.verify_pending(root) == 1
-    [original, second] = score.read_rows(part)
+    [original, second] = read_rows(part)
     assert original == first
     assert second["observed"] is False
     assert second["persist_pct"] is None
@@ -206,12 +207,12 @@ def test_verify_waits_and_keeps_the_first_result(root):
 
 
 def test_verify_fills_missing_climatology(root):
-    write(score.partition(root / "gold" / "predictions", T), [prediction()], score.SCHEMA)
-    part = score.partition(root / "gold" / "verification", T)
+    write(month_path(root / "gold" / "predictions", T, "part.parquet"), [prediction()], score.SCHEMA)
+    part = month_path(root / "gold" / "verification", T, "part.parquet")
     row = prediction() | {"verified_at": ISSUED, "observed": True, "motion_pct": 0}
     write(part, [row | {"clim_pct": None}], verify.SCHEMA)
     assert verify.verify_pending(root) == 0
-    assert [row["clim_pct"] for row in score.read_rows(part)] == [25]
+    assert [row["clim_pct"] for row in read_rows(part)] == [25]
 
 
 @pytest.mark.parametrize(
@@ -219,7 +220,7 @@ def test_verify_fills_missing_climatology(root):
 )
 def test_bmkg_as_of_issue(root, monkeypatch, alignment, wet):
     monkeypatch.setitem(config.settings()["bmkg"], "step_alignment", alignment)
-    write(score.partition(root / "gold" / "predictions", T), [prediction()], score.SCHEMA)
+    write(month_path(root / "gold" / "predictions", T, "part.parquet"), [prediction()], score.SCHEMA)
     write_slots(root, "rain_kabkota", [rain(T, 2), rain(T + HALF, 2)], RAIN_SCHEMA)
     newest_available = T - 4 * HALF
     rows = [
@@ -237,9 +238,9 @@ def test_bmkg_as_of_issue(root, monkeypatch, alignment, wet):
             (T - 8 * HALF, ISSUED - HALF, T, 0),
         ]
     ]
-    write(score.partition(root / "silver" / "bmkg_forecast", T), rows, BMKG_SCHEMA)
+    write(month_path(root / "silver" / "bmkg_forecast", T, "part.parquet"), rows, BMKG_SCHEMA)
     assert verify.verify_pending(root) == 1
-    [row] = score.read_rows(score.partition(root / "gold" / "verification", T))
+    [row] = read_rows(month_path(root / "gold" / "verification", T, "part.parquet"))
     assert row["bmkg_rain"] is wet
     assert row["bmkg_analysis_time"] == newest_available
 
@@ -257,12 +258,12 @@ def test_daily_scores(root):
         }
         for t, p, wet, bmkg in [(T - HALF, 80, True, True), (T, 60, False, None)]
     ]
-    write(score.partition(root / "gold" / "verification", T), rows, verify.SCHEMA)
+    write(month_path(root / "gold" / "verification", T, "part.parquet"), rows, verify.SCHEMA)
     runner = CliRunner()
     result = runner.invoke(app, ["live", "daily", "--day", T.date().isoformat()])
     assert result.exit_code == 0, result.exception
-    output = score.partition(root / "gold" / "scores_daily", T)
-    first = score.read_rows(output)
+    output = month_path(root / "gold" / "scores_daily", T, "part.parquet")
+    first = read_rows(output)
     assert len(first) == 12
     by_scope = {(r["scope"], r["scope_id"], r["source"]): r for r in first}
     model = by_scope["national", "ID", "model"]
@@ -278,4 +279,4 @@ def test_daily_scores(root):
     assert by_scope["island", "Jawa", "bmkg"]["n"] == 1
     assert by_scope["province", "35", "clim"]["bss"] == 0
     assert scores_daily.write_day(root, T.date()) == 12
-    assert score.read_rows(output) == first
+    assert read_rows(output) == first

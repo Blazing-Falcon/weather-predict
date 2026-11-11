@@ -9,10 +9,11 @@ import pyarrow.parquet as pq
 import pytest
 
 from nowcast import config
-from nowcast.cloud.flow import CloudMotion
+from nowcast.cloud import CLOUD_PARTS, CloudMotion
 from nowcast.registry.grids import Grid
 from nowcast.sources import mergir
-from nowcast.sources.mergir import PART, Granule, read_crop, write_month
+from nowcast.sources.mergir import Granule, read_crop, write_month
+from nowcast.timeslots import SLOT
 from nowcast.zonal import Zonal
 
 
@@ -42,7 +43,7 @@ def test_write_month_is_byte_identical_and_motion_requires_previous_slot(tmp_pat
     assert stats["frames"] == 4
     assert last[0] == start + timedelta(hours=2, minutes=30)
     np.testing.assert_array_equal(last[1], warm)
-    table = pq.read_table(silver / PART)
+    table = pq.read_table(silver / CLOUD_PARTS[1])
     assert table["area_id"].to_pylist() == [4] * 4 + [7] * 4
     assert table["source"].to_pylist() == [1] * 8
     assert table["tb_min"].to_pylist() == [230] * 4 + [220, 280] * 2
@@ -59,7 +60,7 @@ def test_write_month_is_byte_identical_and_motion_requires_previous_slot(tmp_pat
     write_month(
         granules, bronze, silver, grid, zonal, motion, (start - timedelta(minutes=30), cold),
     )
-    seeded = pq.read_table(silver / PART)
+    seeded = pq.read_table(silver / CLOUD_PARTS[1])
     assert seeded["adv1_pct"][0].as_py() == 100
     assert seeded["adv1_pct"][4].as_py() == 100
     assert seeded["adv1_pct"][2].as_py() is None
@@ -97,7 +98,7 @@ def test_backfill_prefetches_next_pending_month(tmp_path, monkeypatch, download_
     state_path.write_text(json.dumps({"2025-02": {"done": True}}))
     previous_months, downloads, writes = [], [], []
     march_started = Event()
-    last_slot = feb - mergir.SLOT_LENGTH
+    last_slot = feb - SLOT
 
     def download_month(granules, bronze, grid, parallel):
         assert parallel == 2

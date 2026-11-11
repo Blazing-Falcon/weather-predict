@@ -1,6 +1,5 @@
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
-from fcntl import LOCK_EX, flock
 from pathlib import Path
 from typing import Annotated
 
@@ -8,11 +7,12 @@ import pyarrow as pa
 import typer
 
 from nowcast import config, paths
-from nowcast.features.build import CLOUD_PARTS, month_ranges
+from nowcast.cloud import CLOUD_PARTS
+from nowcast.locks import file_lock
 from nowcast.log import get_logger
-from nowcast.model.score import HALF_HOUR, UTC_US, partition, read_rows, read_slots
 from nowcast.model.verify import BLOCK_START, bmkg_result
-from nowcast.parquet import write_table
+from nowcast.storage import month_path, read_rows, read_slots, write_table
+from nowcast.timeslots import SLOT, UTC_US, month_ranges
 
 SCHEMA = pa.schema(
     [
@@ -31,7 +31,7 @@ def latest_predictions(root: Path, first: datetime, stop: datetime) -> list[dict
         rows = []
         for month, _ in month_ranges(first, stop):
             rows += read_rows(
-                partition(root / "gold" / table, month),
+                month_path(root / "gold" / table, month, "part.parquet"),
                 columns=["t", "area_id", "lead_h", "model_version", "prob_pct"],
                 filters=[("t", ">=", first), ("t", "<", stop)],
             )
@@ -52,7 +52,7 @@ def rebuild(root: Path, now: datetime, days: int) -> tuple[int, int]:
     target = root / "gold" / "map_frames"
     settings = config.settings()["bmkg"]
     alignment, rain_code = settings["step_alignment"], settings["rain_codes_min"]
-    step_offset = BLOCK_START[alignment] * HALF_HOUR
+    step_offset = BLOCK_START[alignment] * SLOT
     step_duration = timedelta(hours=3)
     runs = defaultdict(lambda: defaultdict(list))
     for part in (silver / "bmkg_forecast").glob("year=*/month=*/part.parquet"):
@@ -93,12 +93,12 @@ def rebuild(root: Path, now: datetime, days: int) -> tuple[int, int]:
         midnight = first + timedelta(days=day)
         values = frames[midnight.date()]
         for offset in range(48):
-            slot = midnight + offset * HALF_HOUR
+            slot = midnight + offset * SLOT
             if slot > now:
                 break
             for area, area_runs in ordered_runs.items():
                 wet, analysis = bmkg_result(
-                    area_runs, slot, slot, slot + HALF_HOUR, alignment, rain_code
+                    area_runs, slot, slot, slot + SLOT, alignment, rain_code
                 )
                 if wet is not None:
                     values["bmkg", slot, area] = 100 * wet
@@ -126,7 +126,6 @@ def rebuild(root: Path, now: datetime, days: int) -> tuple[int, int]:
                 schema=SCHEMA,
             )
             part.parent.mkdir(parents=True, exist_ok=True)
-            part.with_suffix(".parquet.tmp").unlink(missing_ok=True)
             write_table(table, part)
             dates += 1
             rows += table.num_rows
@@ -138,7 +137,6 @@ def frames(days: Annotated[int, typer.Option(min=1)] = 7) -> None:
     root = paths.data_root()
     state = root / "state"
     state.mkdir(parents=True, exist_ok=True)
-    with (state / "map_frames.lock").open("a") as lock:
-        flock(lock, LOCK_EX)
+    with file_lock(state, "map_frames.lock"):
         dates, rows = rebuild(root, datetime.now(UTC), days)
     get_logger(__name__).info("Map frames dates=%d rows=%d", dates, rows)

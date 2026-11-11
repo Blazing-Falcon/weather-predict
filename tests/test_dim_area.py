@@ -2,8 +2,8 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-from nowcast.parquet import write_table
 from nowcast.registry.dim_area import island_and_tz
+from nowcast.storage import write_table
 
 
 @pytest.mark.parametrize(

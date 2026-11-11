@@ -1,7 +1,5 @@
-import fcntl
 import gzip
 import json
-import os
 import zlib
 from contextlib import ExitStack
 from datetime import UTC, datetime, timedelta
@@ -13,21 +11,14 @@ import typer
 
 from nowcast import config, http, paths
 from nowcast.http import rate_limit
+from nowcast.locks import file_lock
 from nowcast.log import get_logger
-
-
-def utc_now() -> str:
-    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+from nowcast.storage import atomic_write, write_json
+from nowcast.timeslots import utc_now, utc_text
 
 
 def compact_stamp(timestamp: str) -> str:
     return timestamp.replace("-", "").replace(":", "")
-
-
-def save_json(path: Path, data: dict) -> None:
-    temp = path.with_suffix(".tmp")
-    temp.write_text(json.dumps(data) + "\n", encoding="utf-8")
-    os.replace(temp, path)
 
 
 def analysis_date(line: dict) -> str | None:
@@ -49,7 +40,7 @@ def analysis_date(line: dict) -> str | None:
             stamp = datetime.fromisoformat(value)
             if stamp.tzinfo is None:
                 stamp = stamp.replace(tzinfo=UTC)
-            return stamp.astimezone(UTC).isoformat().replace("+00:00", "Z")
+            return utc_text(stamp)
     except (ValueError, TypeError, AttributeError):
         pass
     return None
@@ -124,7 +115,6 @@ def sweep(
     def close_chunk() -> None:
         nonlocal output, lines, rows_written, bytes_written
         files.close()
-        os.replace(temp, path)
         rows_written += lines
         bytes_written += path.stat().st_size
         for response_run, area_ids in chunk_done.items():
@@ -133,21 +123,21 @@ def sweep(
                 credit(credited, area_id)
             if picks.keys() <= set(credited["done"]):
                 credited["complete"] = True
-        save_json(state_path, state)
+        write_json(state_path, state, indent=None)
         chunk_done.clear()
         output = None
         lines = 0
 
     def archive(response: httpx.Response) -> None:
-        nonlocal output, path, temp, stamp, chunk_number, lines, ok
+        nonlocal output, path, stamp, chunk_number, lines, ok
         line = response_line(response, area_id, adm4)
         if output is None:
             if chunk_number == 0:
                 stamp = compact_stamp(line["fetched_at"])
             chunk_number += 1
             path = directory / f"sweep={stamp}-{chunk_number}.jsonl.gz"
-            temp = path.with_suffix(".tmp")
-            output = files.enter_context(gzip.open(temp, "wt", encoding="utf-8"))  # noqa: SIM115
+            file = files.enter_context(atomic_write(path))
+            output = files.enter_context(gzip.open(file, "wt", encoding="utf-8"))  # noqa: SIM115
         output.write(json.dumps(line, ensure_ascii=False) + "\n")
         response_run = analysis_date(line)
         if response_run in runs:
@@ -158,7 +148,6 @@ def sweep(
             close_chunk()
 
     path: Path
-    temp: Path
     stamp: str
     pending = ((area_id, adm4) for area_id, adm4 in picks.items() if area_id not in done)
     with ExitStack() as files:
@@ -169,13 +158,13 @@ def sweep(
                 fetch(client, url, adm4)
                 failed += ok == before
                 if index % 50 == 0:
-                    save_json(state_path, state)
+                    write_json(state_path, state, indent=None)
             if output is not None:
                 close_chunk()
         finally:
             client.event_hooks["response"].remove(archive)
 
-    save_json(state_path, state)
+    write_json(state_path, state, indent=None)
     return ok, failed, rows_written, bytes_written
 
 
@@ -187,10 +176,8 @@ def tick() -> dict:
     logger = get_logger(__name__)
     report = {"rows": 0, "bytes": 0, "latency_min": None}
 
-    with (root / "state" / "bmkg.lock").open("a") as lock:
-        try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
+    with file_lock(root / "state", "bmkg.lock", blocking=False) as acquired:
+        if not acquired:
             logger.info("BMKG tick already running")
             return report
 
@@ -206,7 +193,7 @@ def tick() -> dict:
             state = json.loads(state_path.read_text(encoding="utf-8"))
         else:
             state = {"runs": {}}
-            save_json(state_path, state)
+            write_json(state_path, state, indent=None)
         runs = state["runs"]
 
         rows = pq.read_table(
@@ -240,7 +227,7 @@ def tick() -> dict:
                     directory.mkdir(parents=True, exist_ok=True)
                     stamp = compact_stamp(fetched_at)
                     path = directory / f"sentinel={stamp}.jsonl.gz"
-                    with gzip.open(path, "wt", encoding="utf-8") as output:
+                    with atomic_write(path) as file, gzip.open(file, "wt", encoding="utf-8") as output:
                         output.write(json.dumps(line, ensure_ascii=False) + "\n")
                     report["rows"] += 1
                     report["bytes"] += path.stat().st_size
@@ -254,7 +241,7 @@ def tick() -> dict:
                         "complete": False,
                         "last_sweep": None,
                     }
-                    save_json(state_path, state)
+                    write_json(state_path, state, indent=None)
 
             cutoff = datetime.fromisoformat(utc_now()) - timedelta(
                 hours=settings["retry_missing_hours"]
@@ -273,7 +260,7 @@ def tick() -> dict:
                     continue
                 progress.update(missing=missing, complete=True)
                 logger.warning("BMKG run %s expired; missing areas %s", run, missing)
-            save_json(state_path, state)
+            write_json(state_path, state, indent=None)
 
             if newest is not None and not runs[newest]["complete"]:
                 ok, failed, rows_written, bytes_written = sweep(
@@ -288,7 +275,7 @@ def tick() -> dict:
                 report["rows"] += rows_written
                 report["bytes"] += bytes_written
 
-        save_json(
+        write_json(
             root / "state" / "health" / "bmkg.json",
             {
                 "last_tick": utc_now(),
@@ -297,5 +284,6 @@ def tick() -> dict:
                 "points_failed": failed,
                 "runs_incomplete": sum(not progress["complete"] for progress in runs.values()),
             },
+            indent=None,
         )
     return report

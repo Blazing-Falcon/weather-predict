@@ -1,9 +1,6 @@
-import json
 from collections import defaultdict
 from datetime import UTC, datetime
-from fcntl import LOCK_EX, flock
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 from typing import Annotated
 
 import numpy as np
@@ -12,9 +9,11 @@ from numpy.typing import NDArray
 from PIL import Image
 
 from nowcast import config, paths
-from nowcast.cloud.features import valid_tb
+from nowcast.cloud import valid_tb
+from nowcast.locks import file_lock
 from nowcast.log import get_logger
 from nowcast.registry.grids import Grid, imerg_grid, mergir_grid
+from nowcast.storage import atomic_write, write_json
 
 RAIN_BOUNDS = {"west": 94.0, "east": 142.0, "south": -11.5, "north": 6.5}
 
@@ -37,25 +36,13 @@ def write_bounds(root: Path, rain: Grid, cloud: Grid) -> None:
         },
     }
     root.mkdir(parents=True, exist_ok=True)
-    with NamedTemporaryFile(dir=root, mode="w", encoding="utf-8", delete=False) as temp:
-        try:
-            json.dump(bounds, temp, indent=2)
-            temp.write("\n")
-            temp.close()
-            Path(temp.name).replace(root / "bounds.json")
-        finally:
-            Path(temp.name).unlink(missing_ok=True)
+    write_json(root / "bounds.json", bounds)
 
 
 def write_image(path: Path, pixels: NDArray, format: str, **options) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with NamedTemporaryFile(dir=path.parent, delete=False) as temp:
-        try:
-            Image.fromarray(pixels[::-1]).save(temp, format=format, **options)
-            temp.close()
-            Path(temp.name).replace(path)
-        finally:
-            Path(temp.name).unlink(missing_ok=True)
+    with atomic_write(path) as file:
+        Image.fromarray(pixels[::-1]).save(file, format=format, **options)
     get_logger(__name__).info("Tile %s bytes=%d", path.name, path.stat().st_size)
 
 
@@ -79,7 +66,7 @@ def backfill(
     cloud_from: Annotated[str, typer.Option(help="Earliest cloud scan, as an ISO timestamp.")],
 ) -> None:
     """Render missing rain and cloud tiles from retained bronze data."""
-    from nowcast.sources.himawari import _decode
+    from nowcast.sources.himawari import decode
     from nowcast.sources.imerg import read_crop, select_granules
 
     try:
@@ -110,8 +97,7 @@ def backfill(
         target = tile_path(root, "rain", granule.slot)
         if target.exists():
             continue
-        with (state / "imerg.lock").open("a") as lock:
-            flock(lock, LOCK_EX)
+        with file_lock(state, "imerg.lock"):
             if not target.exists():
                 write_rain(target, read_crop(crops[granule.title], rain), rain)
                 rain_count += 1
@@ -130,11 +116,10 @@ def backfill(
         segments = source["segments"]
         if target.exists() or not all(segment in files for segment in segments):
             continue
-        with (state / "himawari.lock").open("a") as lock:
-            flock(lock, LOCK_EX)
+        with file_lock(state, "himawari.lock"):
             selected = [files[s] for s in segments]
             if not target.exists() and all(file.exists() for file in selected):
-                tb = _decode(selected, state / "himawari_index.npz", cloud, source)
+                tb = decode(selected, state / "himawari_index.npz", cloud, source)
                 write_cloud(target, tb)
                 cloud_count += 1
     typer.echo(f"Rendered {rain_count} rain tiles and {cloud_count} cloud tiles.")

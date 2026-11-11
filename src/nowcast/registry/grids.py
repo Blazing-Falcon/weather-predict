@@ -11,6 +11,7 @@ from numpy.typing import NDArray
 
 from nowcast import config, http
 from nowcast.log import get_logger
+from nowcast.storage import write_json
 
 EARTH_RADIUS_KM = 6371.0072
 MERGIR_PATH = config.CONFIG_DIR / "geo" / "mergir_grid.json"
@@ -128,13 +129,5 @@ def fetch_mergir_grid() -> None:
                 )
             data[axis] = values.tolist()
 
-    temp = MERGIR_PATH.with_suffix(".json.tmp")
-    target = temp.open("x", encoding="utf-8")
-    try:
-        with target:
-            target.write(json.dumps(data, indent=2, allow_nan=False) + "\n")
-        temp.replace(MERGIR_PATH)
-    except BaseException:
-        temp.unlink(missing_ok=True)
-        raise
+    write_json(MERGIR_PATH, data, allow_nan=False)
     logger.info("Wrote %s", MERGIR_PATH)

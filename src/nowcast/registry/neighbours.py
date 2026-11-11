@@ -5,9 +5,9 @@ import shapely
 
 from nowcast import paths
 from nowcast.log import get_logger
-from nowcast.parquet import write_table
 from nowcast.registry.grids import EARTH_RADIUS_KM
 from nowcast.registry.membership import admin_areas
+from nowcast.storage import write_table
 
 SCHEMA = pa.schema(
     [

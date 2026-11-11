@@ -38,6 +38,7 @@ from nowcast.registry import boundaries, dim_area, membership, neighbours
 from nowcast.retention import disk_usage, retention
 from nowcast.silver import bmkg as forecast
 from nowcast.sources import bmkg, gauges, himawari, imerg, mergir
+from nowcast.storage import month_path
 
 # Include the open UTC month for live data.
 MONTHS = MonthlyPartitionsDefinition(start_date="2016-01-01", timezone="UTC", end_offset=1)
@@ -201,7 +202,7 @@ def gauge_assets(context: AssetExecutionContext, config: BackfillConfig):
 def rain_rows_per_slot() -> AssetCheckResult:
     month = MONTHS.get_last_partition_key()
     stamp = datetime.strptime(month, "%Y-%m-%d")
-    part = paths.zone("silver") / "rain_kabkota" / f"year={stamp:%Y}" / f"month={stamp:%m}"
+    part = month_path(paths.zone("silver") / "rain_kabkota", stamp)
     part /= "part.parquet"
     counts = []
     if part.is_file():

@@ -1,6 +1,5 @@
 from collections import defaultdict
 from datetime import UTC, date, datetime, timedelta
-from fcntl import LOCK_EX, flock
 from functools import cache
 from pathlib import Path
 from typing import Annotated
@@ -9,11 +8,13 @@ import numpy as np
 import pyarrow as pa
 import typer
 
-from nowcast import parquet, paths
-from nowcast.features.build import date_range
+from nowcast import paths, storage
+from nowcast.locks import file_lock
 from nowcast.log import get_logger
 from nowcast.model import metrics
-from nowcast.model.score import model_card, partition, read_rows
+from nowcast.model.score import model_card
+from nowcast.storage import month_path, read_rows
+from nowcast.timeslots import date_range
 
 SOURCES = {
     "model": "prob_pct",
@@ -38,9 +39,9 @@ SCHEMA = pa.schema(
 def write_day(root: Path, day: date) -> int:
     first, stop = date_range(day.isoformat(), day.isoformat())
     gold = root / "gold"
-    output = partition(gold / "scores_daily", day)
+    output = month_path(gold / "scores_daily", day, "part.parquet")
     rows = read_rows(
-        partition(gold / "verification", day), filters=[("t", ">=", first), ("t", "<", stop)]
+        month_path(gold / "verification", day, "part.parquet"), filters=[("t", ">=", first), ("t", "<", stop)]
     )
     groups = defaultdict(list)
     if rows:
@@ -113,7 +114,7 @@ def write_day(root: Path, day: date) -> int:
     if scores or output.is_file():
         previous = [row for row in read_rows(output) if row["day"] != day]
         output.parent.mkdir(parents=True, exist_ok=True)
-        parquet.write_table(pa.Table.from_pylist(previous + scores, schema=SCHEMA), output)
+        storage.write_table(pa.Table.from_pylist(previous + scores, schema=SCHEMA), output)
     return len(scores)
 
 
@@ -125,7 +126,6 @@ def daily(
     root = paths.data_root()
     state = root / "state"
     state.mkdir(parents=True, exist_ok=True)
-    with (state / "daily.lock").open("a") as lock:
-        flock(lock, LOCK_EX)
+    with file_lock(state, "daily.lock"):
         count = write_day(root, issue_day)
     get_logger(__name__).info("Wrote %d daily score rows for %s", count, issue_day)

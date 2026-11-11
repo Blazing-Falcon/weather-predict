@@ -1,7 +1,5 @@
 import json
-import os
 from datetime import UTC, datetime, timedelta
-from fcntl import LOCK_EX, LOCK_SH, flock
 from operator import itemgetter
 from pathlib import Path
 from typing import Annotated
@@ -10,16 +8,17 @@ import lightgbm as lgb
 import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
-import pyarrow.parquet as pq
 import typer
 
-from nowcast import config, parquet, paths
+from nowcast import config, paths, storage
+from nowcast.cloud import CLOUD_PARTS
 from nowcast.features import build
 from nowcast.features.spark import spark_session
+from nowcast.locks import directory_lock, file_lock
 from nowcast.log import get_logger
+from nowcast.storage import month_path, read_rows, read_slots, write_json
+from nowcast.timeslots import SLOT, UTC_US
 
-UTC_US = pa.timestamp("us", tz="UTC")
-HALF_HOUR = timedelta(minutes=30)
 KEY = itemgetter("t", "area_id", "lead_h", "model_version")
 SCHEMA = pa.schema(
     [
@@ -44,39 +43,15 @@ RAIN_FEATURES = [
 ]
 
 
-def partition(directory, time, part="part.parquet"):
-    return directory / f"year={time:%Y}" / f"month={time:%m}" / part
-
-
-def read_rows(path, **options):
-    return pq.read_table(path, partitioning=None, **options).to_pylist() if path.is_file() else []
-
-
-def read_slots(directory, first, stop, columns, part="part.parquet", filters=()):
-    for month, _ in build.month_ranges(first, stop):
-        yield from read_rows(
-            partition(directory, month, part),
-            columns=columns,
-            filters=[("slot", ">=", first), ("slot", "<", stop), *filters],
-        )
-
-
 def model_card(root, version):
     return json.loads((root / "models" / version / "card.json").read_text(encoding="utf-8"))
-
-
-def save_state(path, values):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temp = path.with_suffix(".json.tmp")
-    temp.write_text(json.dumps(values, indent=2) + "\n", encoding="utf-8")
-    temp.replace(path)
 
 
 def live_features(root, pending, lag):
     slots = {build.available_imerg_slot(t, lag) for t in pending}
     rain = root / "silver" / "rain_kabkota"
     available = {
-        row["slot"] for row in read_slots(rain, min(slots), max(slots) + HALF_HOUR, ["slot"])
+        row["slot"] for row in read_slots(rain, min(slots), max(slots) + SLOT, ["slot"])
     }
     missing = slots - available
     logger = get_logger(__name__)
@@ -92,7 +67,7 @@ def live_features(root, pending, lag):
             build.admin_areas(spark, root),
             build.read_climatology(spark, root),
             pending[0],
-            pending[-1] + HALF_HOUR,
+            pending[-1] + SLOT,
             lag,
             1,
             cloud_source=2,
@@ -146,9 +121,9 @@ def score_pending(root: Path, now: datetime) -> int:
         for row in read_slots(
             cloud,
             cutoff - timedelta(hours=1),
-            now + HALF_HOUR,
+            now + SLOT,
             ["slot"],
-            build.CLOUD_PARTS[2],
+            CLOUD_PARTS[2],
             [("source", "=", 2)],
         )
     }
@@ -170,27 +145,25 @@ def score_pending(root: Path, now: datetime) -> int:
     count = 0
     window_slots = 2 * max(map(int, card["leads"]))
     # IMERG tick and backfill take this directory lock before publishing rain.
-    directory_lock = os.open(state, os.O_RDONLY | os.O_DIRECTORY)
-    try:
-        flock(directory_lock, LOCK_SH)
+    with directory_lock(state, shared=True):
         rain_slots = {
             row["slot"]
             for row in read_slots(
                 root / "silver" / "rain_kabkota",
                 pending[0],
-                pending[-1] + window_slots * HALF_HOUR,
+                pending[-1] + window_slots * SLOT,
                 ["slot"],
             )
         }
         for t in pending:
-            part = partition(root / "gold" / "predictions", t)
+            part = month_path(root / "gold" / "predictions", t, "part.parquet")
             existing = read_rows(part)
             keys = {KEY(row) for row in existing}
             rows = table.filter(pc.equal(table["t"], pa.scalar(t))).to_pylist()
             new = [row for row in rows if KEY(row) not in keys]
             if len(new) < len(rows):
                 logger.info("Kept %d existing prediction keys for t=%s", len(rows) - len(new), t)
-            if any(t + i * HALF_HOUR in rain_slots for i in range(window_slots)):
+            if any(t + i * SLOT in rain_slots for i in range(window_slots)):
                 if new:
                     logger.warning("Skipped t=%s because IMERG truth is already in silver", t)
                 new = []
@@ -199,7 +172,7 @@ def score_pending(root: Path, now: datetime) -> int:
                 for row in new:
                     row["issued_at"] = issued_at
                 part.parent.mkdir(parents=True, exist_ok=True)
-                parquet.write_table(pa.Table.from_pylist(existing + new, schema=SCHEMA), part)
+                storage.write_table(pa.Table.from_pylist(existing + new, schema=SCHEMA), part)
                 count += len(new)
 
             attempted = {KEY(row) for row in rows}
@@ -213,8 +186,8 @@ def score_pending(root: Path, now: datetime) -> int:
                     "delay_minutes": delay,
                     "rows": len(issued),
                 }
-                save_state(state / "health" / "score.json", health)
-                save_state(cursor, {"last_t": t.isoformat()})
+                write_json(state / "health" / "score.json", health)
+                write_json(cursor, {"last_t": t.isoformat()})
                 if new:
                     logger.info(
                         "Scored t=%s issued_at=%s delay=%.2f min rows=%d",
@@ -223,8 +196,6 @@ def score_pending(root: Path, now: datetime) -> int:
                         delay,
                         len(new),
                     )
-    finally:
-        os.close(directory_lock)
     return count
 
 
@@ -233,8 +204,7 @@ def score() -> None:
     root = paths.data_root()
     state = root / "state"
     state.mkdir(parents=True, exist_ok=True)
-    with (state / "score.lock").open("a") as lock:
-        flock(lock, LOCK_EX)
+    with file_lock(state, "score.lock"):
         score_pending(root, datetime.now(UTC))
 
 
@@ -248,8 +218,8 @@ def hindcast(
     slots = {
         row["slot"]
         for row in read_slots(
-            root / "silver" / "cloud_kabkota", first - timedelta(hours=1), last + HALF_HOUR,
-            ["slot"], build.CLOUD_PARTS[2], [("source", "=", 2)],
+            root / "silver" / "cloud_kabkota", first - timedelta(hours=1), last + SLOT,
+            ["slot"], CLOUD_PARTS[2], [("source", "=", 2)],
         )
     }
     pending = sorted(
@@ -263,7 +233,7 @@ def hindcast(
     issued_at = datetime.now(UTC)
     count = 0
     for t in pending:
-        part = partition(root / "gold" / "hindcast", t)
+        part = month_path(root / "gold" / "hindcast", t, "part.parquet")
         existing = read_rows(part)
         keys = {KEY(row) for row in existing}
         new = [
@@ -273,6 +243,6 @@ def hindcast(
         ]
         if new:
             part.parent.mkdir(parents=True, exist_ok=True)
-            parquet.write_table(pa.Table.from_pylist(existing + new, schema=SCHEMA), part)
+            storage.write_table(pa.Table.from_pylist(existing + new, schema=SCHEMA), part)
             count += len(new)
     get_logger(__name__).info("Hindcast slots=%d rows=%d", len(pending), count)

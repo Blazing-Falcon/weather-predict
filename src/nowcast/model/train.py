@@ -15,8 +15,8 @@ import typer
 from sklearn.isotonic import IsotonicRegression
 
 from nowcast import config, paths
-from nowcast.features.build import date_range
 from nowcast.model import baselines, metrics
+from nowcast.timeslots import date_range
 
 
 def split_filters(periods: dict) -> dict:

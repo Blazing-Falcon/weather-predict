@@ -26,6 +26,12 @@ def test_parse_title(title, version):
     assert imerg.parse_title(title) == imerg.Granule(START, title, version)
 
 
+@pytest.mark.parametrize("title", ["../" + V07C, V07C + "/../crop", "prefix" + V07C])
+def test_parse_title_rejects_unmatched_title(title):
+    with pytest.raises(ValueError, match="Unexpected IMERG title"):
+        imerg.parse_title(title)
+
+
 def test_select_highest_version():
     for titles in ([V07B, V07C], [V07C, V07B]):
         assert imerg.select_granules([{"title": title} for title in titles], START, END) == [

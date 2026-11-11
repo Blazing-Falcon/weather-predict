@@ -58,7 +58,10 @@ class Granule:
 
 
 def parse_title(title: str) -> Granule:
-    match = re.search(r"\.(\d{8}-S\d{6})-E\d{6}\.[^.]+\.(V\d+[A-Z])\.", title)
+    match = re.fullmatch(
+        r"GPM_3IMERGHHE\.07:3B-HHR-E\.MS\.MRG\.3IMERG\."
+        r"(\d{8}-S\d{6})-E\d{6}\.\d{4}\.(V\d+[A-Z])\.HDF5", title
+    )
     if not match:
         raise ValueError(f"Unexpected IMERG title: {title}")
     slot, version = match.groups()

@@ -8,40 +8,76 @@ from typing import Annotated, Literal
 from fastapi import Depends, FastAPI, HTTPException, Query, Response
 from fastapi import Path as PathParam
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from nowcast import config, paths
-from nowcast.api import queries
+from nowcast.api import archive as archive_data
+from nowcast.api import insight, live
+from nowcast.api import pipeline as pipeline_data
 
 app = FastAPI(title="Nowcast API")
 app.add_middleware(GZipMiddleware, compresslevel=4)
 LIVE_CACHE = "public, max-age=60"
 STATIC_CACHE = "public, max-age=86400"
+CONTENT_SECURITY_POLICY = (
+    "default-src 'self'; "
+    "script-src 'self'; "
+    "style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' blob: data:; "
+    "connect-src 'self'; "
+    "font-src 'self'; "
+    "worker-src 'self' blob:; "
+    "object-src 'none'; "
+    "base-uri 'self'; "
+    "frame-ancestors 'none'"
+)
 CACHE_TTL = 60
 _cache = {}
 _cache_lock = Lock()
 
 
+@app.middleware("http")
+async def security_headers(request, call_next):
+    response = await call_next(request)
+    return add_security_headers(response, request.url.path)
+
+
+def add_security_headers(response, path):
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    if path != "/docs":
+        response.headers["Content-Security-Policy"] = CONTENT_SECURITY_POLICY
+    return response
+
+
+@app.exception_handler(500)
+async def server_error(request, error):
+    return add_security_headers(
+        PlainTextResponse("Internal Server Error", status_code=500), request.url.path
+    )
+
+
 def archive():
-    with queries.DB.cursor() as connection:
-        yield queries.Archive(paths.data_root(), connection)
+    root = paths.data_root()
+    with archive_data.database(root).cursor() as connection:
+        yield archive_data.Archive(root, connection)
 
 
-Archive = Annotated[queries.Archive, Depends(archive)]
-AreaId = Annotated[int, PathParam(ge=0, lt=queries.AREA_COUNT)]
+Archive = Annotated[archive_data.Archive, Depends(archive)]
+AreaId = Annotated[int, PathParam(ge=0, lt=archive_data.AREA_COUNT)]
 Lead = Annotated[int, Query(ge=1, le=3)]
 Layer = Literal[
     "obs", "cold", "prob1", "prob2", "prob3", "bmkg", "bmkg_code", "bmkg_step", "bmkg_age", "disagree"
 ]
 
 
-def cached(query, data, now, *args):
+def cached(query, data, *args, key=()):
     with _cache_lock:
-        key = query, data.root, args
+        key = query, data.root, key
         result, expires = _cache.get(key, (None, 0))
         if monotonic() >= expires:
-            result = query(data, *args) if args else query(data, now)
+            result = query(data, *args)
             _cache[key] = (result, monotonic() + CACHE_TTL)
         return result
 
@@ -49,7 +85,7 @@ def cached(query, data, now, *args):
 @app.get("/api/meta", summary="Get source freshness, map assets and the area catalog")
 def meta(response: Response, data: Archive):
     response.headers["Cache-Control"] = LIVE_CACHE
-    return cached(queries.meta, data, datetime.now(UTC))
+    return cached(live.meta, data, datetime.now(UTC))
 
 
 @app.get("/api/frames", summary="Get map frames for one layer")
@@ -73,7 +109,7 @@ def frames(
 
 def area_metadata(data, area_id):
     areas = data.areas(area_id)
-    if not areas and (data.root / queries.AREAS).is_file():
+    if not areas and (data.root / archive_data.AREAS).is_file():
         raise HTTPException(404, "Area not found.")
     return areas[0] if areas else None
 
@@ -81,7 +117,10 @@ def area_metadata(data, area_id):
 @app.get("/api/areas/{area_id}", summary="Get an area's recent weather, scores and climatology")
 def area_detail(response: Response, area_id: AreaId, data: Archive):
     response.headers["Cache-Control"] = LIVE_CACHE
-    return queries.area_detail(data, area_id, area_metadata(data, area_id), datetime.now(UTC))
+    return cached(
+        live.area_detail, data, area_id, area_metadata(data, area_id), datetime.now(UTC),
+        key=(area_id,),
+    )
 
 
 @app.get("/api/alerts", summary="Get model or BMKG rain alerts for the latest model issue")
@@ -100,7 +139,7 @@ def alerts(
     rank = {"waspada": 1, "siaga": 2, "awas": 3, "1": 1, "2": 2, "3": 3}.get(level.casefold())
     if source == "model" and rank is None:
         raise HTTPException(422, "Choose Waspada, Siaga or Awas.")
-    return queries.alerts(data, threshold, rank, island, province, source)
+    return live.alerts(data, threshold, rank, island, province, source)
 
 
 @app.get("/api/scores", summary="Get daily forecast scores by scope and lead")
@@ -119,27 +158,29 @@ def scores(
 @app.get("/api/model", summary="Get model cards, version history and live verification")
 def model(response: Response, data: Archive):
     response.headers["Cache-Control"] = LIVE_CACHE
-    return queries.model(data, datetime.now(UTC))
+    return insight.model(data, datetime.now(UTC))
 
 
 @app.get("/api/history/{area_id}", summary="Get climatology, rainfall totals and wet-season timing")
 def history(response: Response, area_id: AreaId, data: Archive):
     response.headers["Cache-Control"] = LIVE_CACHE
-    return queries.history(data, area_id, area_metadata(data, area_id))
+    return cached(
+        insight.history, data, area_id, area_metadata(data, area_id), key=(area_id,)
+    )
 
 
 @app.get("/api/pipeline", summary="Get job health, latency, storage and recent Dagster runs")
 def pipeline(response: Response, data: Archive):
     response.headers["Cache-Control"] = LIVE_CACHE
-    return cached(queries.pipeline, data, datetime.now(UTC))
+    return cached(pipeline_data.pipeline, data, datetime.now(UTC))
 
 
 @app.get("/api/pipeline/node/{node_id}", summary="Inspect the newest pipeline dataset")
 def pipeline_node(node_id: str, response: Response, data: Archive):
-    if node_id not in queries.PIPELINE_DATASETS:
+    if node_id not in pipeline_data.PIPELINE_DATASETS:
         raise HTTPException(404, "Pipeline dataset not found.")
     response.headers["Cache-Control"] = LIVE_CACHE
-    return queries.pipeline_node(data, node_id)
+    return pipeline_data.pipeline_node(data, node_id)
 
 
 def static_file(path: Path, media_type: str):

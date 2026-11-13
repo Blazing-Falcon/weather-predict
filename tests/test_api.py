@@ -5,14 +5,18 @@ from collections import defaultdict
 from contextlib import closing
 from datetime import UTC, datetime, timedelta
 
+import duckdb
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 from fastapi.testclient import TestClient
 
 from nowcast import config
+from nowcast.api import app as api_routes
+from nowcast.api import archive as archive_data
+from nowcast.api import insight, live
 from nowcast.api.app import app
-from nowcast.api.queries import _read_enso
+from nowcast.api.insight import _read_enso
 
 
 @pytest.fixture
@@ -517,3 +521,108 @@ def test_pipeline_bmkg_preview(client, tmp_path):
         "step_count": 3,
         "steps": [{key: value for key, value in step.items() if key != "image"}] * 2,
     }
+
+
+@pytest.mark.parametrize(
+    "path,status",
+    [
+        ("/", 200),
+        ("/app.js", 200),
+        ("/api/meta", 200),
+        ("/api/meta/", 404),
+        ("/api/frames?layer=invalid", 422),
+        ("/missing.js", 404),
+        ("/tiles/rain/absent.png", 404),
+        ("/docs", 200),
+    ],
+)
+def test_security_headers(client, path, status):
+    response = client.get(path, follow_redirects=False)
+    assert response.status_code == status
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["referrer-policy"] == "no-referrer"
+    if path == "/docs":
+        assert "content-security-policy" not in response.headers
+    else:
+        policy = dict(
+            directive.strip().split(" ", 1)
+            for directive in response.headers["content-security-policy"].split(";")
+        )
+        assert policy == {
+            "default-src": "'self'",
+            "script-src": "'self'",
+            "style-src": "'self' 'unsafe-inline'",
+            "img-src": "'self' blob: data:",
+            "connect-src": "'self'",
+            "font-src": "'self'",
+            "worker-src": "'self' blob:",
+            "object-src": "'none'",
+            "base-uri": "'self'",
+            "frame-ancestors": "'none'",
+        }
+
+
+def test_security_headers_on_server_error(client, monkeypatch):
+    def fail(archive, now):
+        raise RuntimeError("query failed")
+
+    monkeypatch.setattr(live, "meta", fail)
+    with TestClient(app, raise_server_exceptions=False) as errors:
+        response = errors.get("/api/meta")
+    assert response.status_code == 500
+    assert response.text == "Internal Server Error"
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["referrer-policy"] == "no-referrer"
+    assert "frame-ancestors 'none'" in response.headers["content-security-policy"]
+
+
+@pytest.mark.parametrize(
+    "endpoint,module,name", [("areas", live, "area_detail"), ("history", insight, "history")]
+)
+def test_area_cache_expires_and_separates_areas_and_roots(
+    client, archive, tmp_path, monkeypatch, endpoint, module, name
+):
+    clock = [100]
+    monkeypatch.setattr(api_routes, "monotonic", lambda: clock[0])
+    query = getattr(module, name)
+    calls = []
+
+    def counted(data, area_id, *args):
+        calls.append((data.root, area_id))
+        return query(data, area_id, *args)
+
+    monkeypatch.setattr(module, name, counted)
+    first = client.get(f"/api/{endpoint}/2")
+    assert first.status_code == 200
+    assert first.headers["cache-control"] == "public, max-age=60"
+    clock[0] = 159.9
+    assert client.get(f"/api/{endpoint}/2").json() == first.json()
+    assert calls == [(tmp_path, 2)]
+    assert client.get(f"/api/{endpoint}/7").json()["area_id"] == 7
+    assert calls == [(tmp_path, 2), (tmp_path, 7)]
+    assert client.get(f"/api/{endpoint}/3").status_code == 404
+    clock[0] = 160
+    assert client.get(f"/api/{endpoint}/2").status_code == 200
+    assert calls == [(tmp_path, 2), (tmp_path, 7), (tmp_path, 2)]
+    other = tmp_path / "other-root"
+    monkeypatch.setenv("DATA_ROOT", str(other))
+    assert client.get(f"/api/{endpoint}/2").json()["area"] is None
+    assert calls[-1] == (other, 2)
+    assert len(calls) == 4
+
+
+def test_duckdb_restricts_file_access_to_data_root(tmp_path):
+    root = tmp_path / "data"
+    root.mkdir()
+    inside = root / "inside.parquet"
+    outside = tmp_path / "data-other" / "outside.parquet"
+    outside.parent.mkdir()
+    table = pa.table({"value": [1]})
+    pq.write_table(table, inside)
+    pq.write_table(table, outside)
+    with archive_data.database(root).cursor() as connection:
+        assert connection.execute("SELECT * FROM read_parquet(?)", [str(inside)]).fetchall() == [(1,)]
+        assert connection.execute("SELECT current_setting('threads')").fetchone() == (2,)
+        for path in (outside, root / ".." / "data-other" / "outside.parquet"):
+            with pytest.raises(duckdb.PermissionException, match="file system operations are disabled"):
+                connection.execute("SELECT * FROM read_parquet(?)", [str(path)]).fetchall()

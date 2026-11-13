@@ -12,10 +12,18 @@ import typer
 
 from nowcast import config, paths, storage
 from nowcast.cloud import CLOUD_PARTS
-from nowcast.features import build
+from nowcast.features.rows import (
+    FEATURES,
+    KEYS,
+    admin_areas,
+    available_imerg_slot,
+    feature_rows,
+    read_climatology,
+)
 from nowcast.features.spark import spark_session
 from nowcast.locks import directory_lock, file_lock
 from nowcast.log import get_logger
+from nowcast.model.cards import model_card
 from nowcast.storage import month_path, read_rows, read_slots, write_json
 from nowcast.timeslots import SLOT, UTC_US
 
@@ -43,12 +51,8 @@ RAIN_FEATURES = [
 ]
 
 
-def model_card(root, version):
-    return json.loads((root / "models" / version / "card.json").read_text(encoding="utf-8"))
-
-
 def live_features(root, pending, lag):
-    slots = {build.available_imerg_slot(t, lag) for t in pending}
+    slots = {available_imerg_slot(t, lag) for t in pending}
     rain = root / "silver" / "rain_kabkota"
     available = {
         row["slot"] for row in read_slots(rain, min(slots), max(slots) + SLOT, ["slot"])
@@ -61,18 +65,18 @@ def live_features(root, pending, lag):
         )
 
     with spark_session(root) as spark:
-        rows = build.feature_rows(
+        rows = feature_rows(
             spark,
             root,
-            build.admin_areas(spark, root),
-            build.read_climatology(spark, root),
+            admin_areas(spark, root),
+            read_climatology(spark, root),
             pending[0],
             pending[-1] + SLOT,
             lag,
             1,
             cloud_source=2,
         )
-        table = rows.where(rows.t.isin(pending)).select(*build.KEYS, *build.FEATURES).toArrow()
+        table = rows.where(rows.t.isin(pending)).select(*KEYS, *FEATURES).toArrow()
     frame = table.to_pandas(categories=["island"])
     frame.loc[frame["imerg_slot"].isin(missing), RAIN_FEATURES] = np.nan
     return frame
@@ -97,13 +101,30 @@ def predict(root: Path, pending: list[datetime]) -> tuple[pa.Table, dict]:
             probabilities = np.interp(
                 probabilities, calibration["thresholds"], calibration["values"]
             )
-        rows = frame[build.KEYS].copy()
+        rows = frame[KEYS].copy()
         rows["lead_h"] = int(lead)
         rows["model_version"] = version
         rows["prob_pct"] = np.rint(probabilities * 100).astype(np.uint8)
         predictions.append(pa.Table.from_pandas(rows, preserve_index=False))
 
     return pa.concat_tables(predictions), card
+
+
+def issue_slots(root, first, last):
+    slots = {
+        row["slot"]
+        for row in read_slots(
+            root / "silver" / "cloud_kabkota", first - timedelta(hours=1), last + SLOT,
+            ["slot"], CLOUD_PARTS[2], [("source", "=", 2)],
+        )
+    }
+    return sorted(
+        t for t in slots
+        if first <= t <= last
+        and t.minute in (0, 30)
+        and t.second == t.microsecond == 0
+        and t - timedelta(hours=1) in slots
+    )
 
 
 def score_pending(root: Path, now: datetime) -> int:
@@ -114,28 +135,7 @@ def score_pending(root: Path, now: datetime) -> int:
         if cursor.exists()
         else datetime.min.replace(tzinfo=UTC)
     )
-    cutoff = now - timedelta(hours=3)
-    cloud = root / "silver" / "cloud_kabkota"
-    slots = {
-        row["slot"]
-        for row in read_slots(
-            cloud,
-            cutoff - timedelta(hours=1),
-            now + SLOT,
-            ["slot"],
-            CLOUD_PARTS[2],
-            [("source", "=", 2)],
-        )
-    }
-    pending = sorted(
-        t
-        for t in slots
-        if cutoff <= t <= now
-        and t > last
-        and t.minute in (0, 30)
-        and t.second == t.microsecond == 0
-        and t - timedelta(hours=1) in slots
-    )
+    pending = [t for t in issue_slots(root, now - timedelta(hours=3), now) if t > last]
     logger = get_logger(__name__)
     if not pending:
         logger.info("No pending Himawari issue slots")
@@ -215,17 +215,7 @@ def hindcast(
     """Score past Himawari slots into gold/hindcast, kept apart from live predictions."""
     root = paths.data_root()
     first, last = datetime.fromisoformat(start), datetime.fromisoformat(end)
-    slots = {
-        row["slot"]
-        for row in read_slots(
-            root / "silver" / "cloud_kabkota", first - timedelta(hours=1), last + SLOT,
-            ["slot"], CLOUD_PARTS[2], [("source", "=", 2)],
-        )
-    }
-    pending = sorted(
-        t for t in slots
-        if first <= t <= last and t.minute in (0, 30) and t - timedelta(hours=1) in slots
-    )
+    pending = issue_slots(root, first, last)
     if not pending:
         get_logger(__name__).info("No Himawari slots to hindcast")
         return

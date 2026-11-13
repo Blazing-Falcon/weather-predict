@@ -12,7 +12,7 @@ from nowcast import paths, storage
 from nowcast.locks import file_lock
 from nowcast.log import get_logger
 from nowcast.model import metrics
-from nowcast.model.score import model_card
+from nowcast.model.cards import model_card
 from nowcast.storage import month_path, read_rows
 from nowcast.timeslots import date_range
 
@@ -36,13 +36,7 @@ SCHEMA = pa.schema(
 )
 
 
-def write_day(root: Path, day: date) -> int:
-    first, stop = date_range(day.isoformat(), day.isoformat())
-    gold = root / "gold"
-    output = month_path(gold / "scores_daily", day, "part.parquet")
-    rows = read_rows(
-        month_path(gold / "verification", day, "part.parquet"), filters=[("t", ">=", first), ("t", "<", stop)]
-    )
+def score_groups(root, rows):
     groups = defaultdict(list)
     if rows:
         areas = {
@@ -60,57 +54,78 @@ def write_day(root: Path, day: date) -> int:
             ):
                 groups[scope, scope_id, row["lead_h"]].append(row)
 
+    return groups
+
+
+def probability_thresholds(root, selected, source, card_for):
+    # Binary baselines keep 0.5; a tuned cutoff can only make them always predict rain.
+    if source not in {"model", "clim"}:
+        return 0.5
+    thresholds = []
+    for row in selected:
+        card = card_for(root, row["model_version"])
+        cutoff = card["leads"][str(row["lead_h"])]["csi_thresholds"]["probability"][source]
+        thresholds.append(cutoff)
+    return np.array(thresholds)
+
+
+
+def source_score(root, group, source, card_for):
+    column = SOURCES[source]
+    selected = [row for row in group if row[column] is not None]
+    if not selected:
+        return None
+    y = np.array([row["observed"] for row in selected], dtype=float)
+    p = np.array([row[column] for row in selected], dtype=float)
+    if source != "bmkg":
+        p /= 100
+    thresholds = probability_thresholds(root, selected, source, card_for)
+    hits, false_alarms, misses = metrics.contingency(y, p, thresholds)
+    clim = np.array([row["clim_pct"] for row in selected], dtype=float) / 100
+    matched = np.isfinite(clim)
+    skill = (
+        metrics.bss(
+            metrics.brier(y[matched], p[matched]), metrics.brier(y[matched], clim[matched])
+        )
+        if matched.any()
+        else None
+    )
+    return {
+        "n": len(y),
+        "brier": metrics.brier(y, p),
+        "bss": skill,
+        "csi": metrics.csi(hits, false_alarms, misses),
+        "pod": metrics.pod(hits, misses),
+        "far": metrics.far(hits, false_alarms),
+        "base_rate": float(y.mean()),
+    }
+
+
+def write_day(root: Path, day: date) -> int:
+    first, stop = date_range(day.isoformat(), day.isoformat())
+    gold = root / "gold"
+    output = month_path(gold / "scores_daily", day, "part.parquet")
+    rows = read_rows(
+        month_path(gold / "verification", day, "part.parquet"),
+        filters=[("t", ">=", first), ("t", "<", stop)],
+    )
+    groups = score_groups(root, rows)
     card_for = cache(model_card)
     scores = []
     for (scope, scope_id, lead), group in sorted(groups.items()):
-        for source, column in SOURCES.items():
-            selected = [row for row in group if row[column] is not None]
-            if not selected:
-                continue
-            y = np.array([row["observed"] for row in selected], dtype=float)
-            p = np.array([row[column] for row in selected], dtype=float)
-            if source != "bmkg":
-                p /= 100
-            # Baselines that are 0 or 1 keep 0.5: a tuned cutoff can only make them "always rain".
-            thresholds = (
-                np.array(
-                    [
-                        card_for(root, row["model_version"])["leads"][str(lead)]["csi_thresholds"][
-                            "probability"
-                        ][source]
-                        for row in selected
-                    ]
+        for source in SOURCES:
+            score = source_score(root, group, source, card_for)
+            if score is not None:
+                scores.append(
+                    {
+                        "day": day,
+                        "scope": scope,
+                        "scope_id": scope_id,
+                        "lead_h": lead,
+                        "source": source,
+                        **score,
+                    }
                 )
-                if source in {"model", "clim"}
-                else 0.5
-            )
-            hits, false_alarms, misses = metrics.contingency(y, p, thresholds)
-            clim = np.array([row["clim_pct"] for row in selected], dtype=float) / 100
-            matched = np.isfinite(clim)
-            skill = (
-                metrics.bss(
-                    metrics.brier(y[matched], p[matched]), metrics.brier(y[matched], clim[matched])
-                )
-                if matched.any()
-                else None
-            )
-            scores.append(
-                {
-                    "day": day,
-                    "scope": scope,
-                    "scope_id": scope_id,
-                    "lead_h": lead,
-                    "source": source,
-                    "n": len(y),
-                    "brier": metrics.brier(y, p),
-                    "bss": skill,
-                    "csi": metrics.csi(hits, false_alarms, misses),
-                    "pod": metrics.pod(hits, misses),
-                    "far": metrics.far(hits, false_alarms),
-                    "base_rate": float(y.mean()),
-                }
-            )
-
     if scores or output.is_file():
         previous = [row for row in read_rows(output) if row["day"] != day]
         output.parent.mkdir(parents=True, exist_ok=True)

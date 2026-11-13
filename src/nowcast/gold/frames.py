@@ -10,7 +10,13 @@ from nowcast import config, paths
 from nowcast.cloud import CLOUD_PARTS
 from nowcast.locks import file_lock
 from nowcast.log import get_logger
-from nowcast.model.verify import BLOCK_START, bmkg_result
+from nowcast.model.bmkg_baseline import (
+    STEP_BLOCK,
+    bmkg_result,
+    newest_run,
+    read_runs,
+    step_at,
+)
 from nowcast.storage import month_path, read_rows, read_slots, write_table
 from nowcast.timeslots import SLOT, UTC_US, month_ranges
 
@@ -44,26 +50,8 @@ def latest_predictions(root: Path, first: datetime, stop: datetime) -> list[dict
     return [row for row in rows if row["model_version"] == versions[row["t"]]]
 
 
-def rebuild(root: Path, now: datetime, days: int) -> tuple[int, int]:
-    today = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    first = today - timedelta(days=days - 1)
-    stop = today + timedelta(days=1)
+def collect_values(root, first, stop):
     silver = root / "silver"
-    target = root / "gold" / "map_frames"
-    settings = config.settings()["bmkg"]
-    alignment, rain_code = settings["step_alignment"], settings["rain_codes_min"]
-    step_offset = BLOCK_START[alignment] * SLOT
-    step_duration = timedelta(hours=3)
-    runs = defaultdict(lambda: defaultdict(list))
-    for part in (silver / "bmkg_forecast").glob("year=*/month=*/part.parquet"):
-        for row in read_rows(
-            part,
-            columns=["area_id", "analysis_time", "first_seen", "valid_time", "weather"],
-            filters=[("first_seen", "<", stop)],
-        ):
-            runs[row["area_id"]][row["analysis_time"]].append(row)
-    ordered_runs = {area: sorted(by_time.items(), reverse=True) for area, by_time in runs.items()}
-
     frames = defaultdict(dict)
     for row in read_slots(
         silver / "rain_kabkota", first, stop, ["slot", "area_id", "rain_mean_x10"]
@@ -88,6 +76,50 @@ def rebuild(root: Path, now: datetime, days: int) -> tuple[int, int]:
         if lead in (1, 2, 3) and value is not None:
             frames[slot.date()][f"prob{lead}", slot, area] = value
 
+    return frames
+
+
+def add_bmkg_layers(values, slot, runs, rain_code):
+    for area, area_runs in runs.items():
+        wet, analysis = bmkg_result(area_runs, slot, slot, slot + SLOT, rain_code)
+        if wet is None:
+            continue
+        values["bmkg", slot, area] = 100 * wet
+        _, _, steps = newest_run(area_runs, slot)
+        start, weather = step_at(steps, slot)
+        if weather is not None:
+            values["bmkg_code", slot, area] = weather
+            values["bmkg_step", slot, area] = (slot - start) // timedelta(minutes=1)
+            values["bmkg_age", slot, area] = (slot - analysis) // timedelta(hours=1)
+        prob3 = values.get(("prob3", slot, area))
+        if prob3 is not None:
+            wet3, _ = bmkg_result(area_runs, slot, slot, slot + STEP_BLOCK, rain_code)
+            values["disagree", slot, area] = int((prob3 >= 50) != wet3)
+
+
+def write_day(root, midnight, values):
+    part = root / "gold" / "map_frames" / f"date={midnight:%Y-%m-%d}" / "part.parquet"
+    if not values and not part.exists():
+        return 0, 0
+    table = pa.Table.from_pylist(
+        [
+            {"slot": slot, "area_id": area, "layer": layer, "value": value}
+            for (layer, slot, area), value in sorted(values.items())
+        ],
+        schema=SCHEMA,
+    )
+    part.parent.mkdir(parents=True, exist_ok=True)
+    write_table(table, part)
+    return 1, table.num_rows
+
+
+def rebuild(root: Path, now: datetime, days: int) -> tuple[int, int]:
+    today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    first = today - timedelta(days=days - 1)
+    stop = today + timedelta(days=1)
+    settings = config.settings()["bmkg"]
+    runs = read_runs(root, first, stop, settings["step_alignment"])
+    frames = collect_values(root, first, stop)
     dates = rows = 0
     for day in range(days):
         midnight = first + timedelta(days=day)
@@ -96,39 +128,10 @@ def rebuild(root: Path, now: datetime, days: int) -> tuple[int, int]:
             slot = midnight + offset * SLOT
             if slot > now:
                 break
-            for area, area_runs in ordered_runs.items():
-                wet, analysis = bmkg_result(
-                    area_runs, slot, slot, slot + SLOT, alignment, rain_code
-                )
-                if wet is not None:
-                    values["bmkg", slot, area] = 100 * wet
-                    for step in runs[area][analysis]:
-                        elapsed = slot - (step["valid_time"] + step_offset)
-                        if timedelta(0) <= elapsed < step_duration:
-                            values["bmkg_code", slot, area] = step["weather"]
-                            values["bmkg_step", slot, area] = elapsed // timedelta(minutes=1)
-                            values["bmkg_age", slot, area] = (slot - analysis) // timedelta(hours=1)
-                            break
-                    prob3 = values.get(("prob3", slot, area))
-                    if prob3 is not None:
-                        wet3, _ = bmkg_result(
-                            area_runs, slot, slot, slot + step_duration, alignment, rain_code
-                        )
-                        values["disagree", slot, area] = int((prob3 >= 50) != wet3)
-
-        part = target / f"date={midnight:%Y-%m-%d}" / "part.parquet"
-        if values or part.exists():
-            table = pa.Table.from_pylist(
-                [
-                    {"slot": slot, "area_id": area, "layer": layer, "value": value}
-                    for (layer, slot, area), value in sorted(values.items())
-                ],
-                schema=SCHEMA,
-            )
-            part.parent.mkdir(parents=True, exist_ok=True)
-            write_table(table, part)
-            dates += 1
-            rows += table.num_rows
+            add_bmkg_layers(values, slot, runs, settings["rain_codes_min"])
+        written, count = write_day(root, midnight, values)
+        dates += written
+        rows += count
     return dates, rows
 
 

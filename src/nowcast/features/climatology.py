@@ -6,7 +6,7 @@ import pyarrow as pa
 from pyspark.sql import functions as F
 
 from nowcast import config, paths
-from nowcast.features.build import (
+from nowcast.features.rows import (
     CLIM_KEYS,
     LEADS,
     RAIN_SCHEMA,

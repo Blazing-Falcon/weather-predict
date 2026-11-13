@@ -12,9 +12,10 @@ from typer.testing import CliRunner
 from nowcast import config
 from nowcast.cli import app
 from nowcast.cloud import CLOUD_SCHEMA
-from nowcast.features.build import available_imerg_slot
+from nowcast.features.rows import available_imerg_slot
 from nowcast.features.spark import spark_session
-from nowcast.model import score, scores_daily, verify
+from nowcast.gold import frames
+from nowcast.model import bmkg_baseline, score, scores_daily, verify
 from nowcast.registry.dim_area import SCHEMA as AREA_SCHEMA
 from nowcast.registry.neighbours import SCHEMA as EDGE_SCHEMA
 from nowcast.sources.bmkg.forecast import SCHEMA as BMKG_SCHEMA
@@ -280,3 +281,94 @@ def test_daily_scores(root):
     assert by_scope["province", "35", "clim"]["bss"] == 0
     assert scores_daily.write_day(root, T.date()) == 12
     assert read_rows(output) == first
+
+
+@pytest.mark.parametrize("valid", [T - timedelta(hours=4), T + timedelta(hours=4)])
+def test_verify_newest_bmkg_run_without_covering_step(root, monkeypatch, valid):
+    monkeypatch.setitem(config.settings()["bmkg"], "step_alignment", "after")
+    write(month_path(root / "gold" / "predictions", T, "part.parquet"), [prediction()], score.SCHEMA)
+    write_slots(root, "rain_kabkota", [rain(T, 2), rain(T + HALF, 2)], RAIN_SCHEMA)
+    write(
+        month_path(root / "silver" / "bmkg_forecast", T, "part.parquet"),
+        [
+            {
+                "area_id": 1,
+                "analysis_time": analysis,
+                "first_seen": seen,
+                "valid_time": step,
+                "weather": 60,
+            }
+            for analysis, seen, step in (
+                (T - timedelta(hours=6), T - timedelta(hours=6), T),
+                (T - timedelta(hours=3), ISSUED, valid),
+                (T, ISSUED + HALF, T),
+            )
+        ],
+        BMKG_SCHEMA,
+    )
+    assert verify.verify_pending(root) == 1
+    [row] = read_rows(month_path(root / "gold" / "verification", T, "part.parquet"))
+    assert row["bmkg_rain"] is None
+    assert row["bmkg_analysis_time"] is None
+
+
+@pytest.mark.parametrize("consumer", ["verify", "frames"])
+def test_bmkg_read_bound_keeps_last_step_and_skips_old_partition(root, monkeypatch, consumer):
+    monkeypatch.setitem(config.settings()["bmkg"], "step_alignment", "after")
+    old = month_path(root / "silver" / "bmkg_forecast", T - timedelta(days=60), "part.parquet")
+    old.parent.mkdir(parents=True)
+    old.write_bytes(b"This partition must not be opened")
+    analysis = T - timedelta(hours=98)
+    write(
+        month_path(root / "silver" / "bmkg_forecast", analysis, "part.parquet"),
+        [{
+            "area_id": 1,
+            "analysis_time": analysis,
+            "first_seen": analysis,
+            "valid_time": analysis + timedelta(hours=96),
+            "weather": 60,
+        }],
+        BMKG_SCHEMA,
+    )
+    if consumer == "verify":
+        write(
+            month_path(root / "gold" / "predictions", T, "part.parquet"),
+            [prediction()], score.SCHEMA,
+        )
+        write_slots(root, "rain_kabkota", [rain(T, 2), rain(T + HALF, 2)], RAIN_SCHEMA)
+        assert verify.verify_pending(root) == 1
+        [row] = read_rows(month_path(root / "gold" / "verification", T, "part.parquet"))
+        assert row["bmkg_rain"] is True
+        assert row["bmkg_analysis_time"] == analysis
+    else:
+        assert frames.rebuild(root, T, 1)[0] == 1
+        rows = read_rows(root / "gold" / "map_frames" / f"date={T:%Y-%m-%d}" / "part.parquet")
+        values = {row["layer"]: row["value"] for row in rows if row["slot"] == T}
+        assert values == {"bmkg": 100, "bmkg_code": 60, "bmkg_step": 120, "bmkg_age": 98}
+
+
+def test_bmkg_read_bound_filters_old_runs_in_same_partition(root, monkeypatch):
+    newest = T - timedelta(hours=98)
+    old = T - timedelta(hours=100)
+    write(
+        month_path(root / "silver" / "bmkg_forecast", T, "part.parquet"),
+        [
+            {
+                "area_id": 1, "analysis_time": analysis, "first_seen": analysis,
+                "valid_time": analysis + timedelta(hours=96), "weather": 60,
+            }
+            for analysis in (old, newest)
+        ],
+        BMKG_SCHEMA,
+    )
+    loaded = []
+
+    def read(path, **options):
+        rows = read_rows(path, **options)
+        loaded.extend(rows)
+        return rows
+
+    monkeypatch.setattr(bmkg_baseline, "read_rows", read)
+    runs = bmkg_baseline.read_runs(root, T, T + HALF, "after")
+    assert [row["analysis_time"] for row in loaded] == [newest]
+    assert bmkg_baseline.bmkg_result(runs[1], ISSUED, T, T + HALF, 60) == (True, newest)

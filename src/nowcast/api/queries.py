@@ -13,6 +13,13 @@ import duckdb
 import pyarrow.parquet as pq
 
 from nowcast import config
+from nowcast.model.bmkg_baseline import (
+    STEP_BLOCK,
+    bmkg_rain,
+    step_offset,
+    weather_at,
+)
+from nowcast.model.cards import cards, has_card, model_card
 from nowcast.retention import directory_size, disk_usage
 from nowcast.storage import month_path
 from nowcast.timeslots import SLOT
@@ -142,11 +149,9 @@ class Archive:
         )
 
     def bmkg(self, first, last, area_id=None, *, end=None):
-        # Runs publish 3-hour steps up to three days ahead.
         start = first - timedelta(days=4)
         settings = config.settings()["bmkg"]
-        alignment = {"before": -3, "after": 0, "centred": -1.5}[settings["step_alignment"]]
-        offset = timedelta(hours=alignment)
+        offset = step_offset(settings["step_alignment"])
         where = "" if area_id is None else "AND area_id = ?"
         params = (start, last) if area_id is None else (start, last, area_id)
         sql = (
@@ -161,7 +166,7 @@ class Archive:
                 " QUALIFY analysis_time = max(analysis_time) OVER (PARTITION BY area_id))"
                 f" WHERE valid_time + ? {upper} ? AND valid_time + ? > ?"
             )
-            params = (*params, first, offset, end or first, offset, first - timedelta(hours=3))
+            params = (*params, first, offset, end or first, offset, first - STEP_BLOCK)
         rows = self.rows(BMKG, sql + " ORDER BY analysis_time DESC", params, first=start, last=last)
         runs = defaultdict(dict)
         for row in rows:
@@ -208,41 +213,12 @@ class Archive:
         )
 
 
-def weather_at(runs, slot, as_of):
-    for analysis, (first_seen, steps) in runs.items():
-        if first_seen <= as_of:
-            for start, weather in steps.items():
-                if start <= slot < start + timedelta(hours=3):
-                    return {"weather": weather, "analysis_time": analysis, "first_seen": first_seen}
-            break
-    return {"weather": None, "analysis_time": None, "first_seen": None}
-
-
-def bmkg_rain(weather):
-    if weather is None:
-        return None
-    return config.settings()["bmkg"]["rain_codes_min"] <= weather <= 99
-
-
 def tile_times(root, layer, suffix, first):
     cutoff = first.strftime("%Y%m%dT%H%MZ")
     return sorted(
         path.stem
         for path in (root / "gold" / "tiles" / layer).glob(f"*{suffix}")
         if path.stem >= cutoff
-    )
-
-
-def cards(root):
-    result = []
-    for path in (root / "models").glob("*/card.json"):
-        card = read_json(path)
-        if card is not None:
-            result.append(card)
-    return sorted(
-        result,
-        key=lambda card: (datetime.fromisoformat(card["created_at"]), card["version"]),
-        reverse=True,
     )
 
 
@@ -296,7 +272,7 @@ def meta(archive, now):
             source: round((now - slot).total_seconds() / 60, 1) if slot is not None else None
             for source, slot in slots.items()
         },
-        "model_version": live if (root / "models" / live / "card.json").is_file() else None,
+        "model_version": live if has_card(root, live) else None,
         "tile_bounds": read_json(root / "gold" / "tiles" / "bounds.json"),
         "tile_times": {
             "rain": tile_times(root, "rain", ".png", now - timedelta(days=7)),
@@ -366,7 +342,6 @@ def alerts(archive, threshold, level, island, province, source):
     by_scan = {(row["area_id"], row["slot"]): row for row in clouds}
     latest = {row["area_id"]: row for row in clouds}
     forecasts = archive.bmkg(issue, issue, end=issue + timedelta(hours=3))
-    rain_code = config.settings()["bmkg"]["rain_codes_min"]
     by_area = defaultdict(list)
     for prediction in predictions:
         by_area[prediction["area_id"]].append(prediction)
@@ -385,7 +360,7 @@ def alerts(archive, threshold, level, island, province, source):
         bmkg_3h = None
         if runs:
             (analysis, (_, steps)), = runs.items()
-            weather = max((code for code in steps.values() if rain_code <= code <= 99), default=None)
+            weather = max((code for code in steps.values() if bmkg_rain(code)), default=None)
             if weather is not None:
                 bmkg_3h = {"weather": weather, "analysis_time": analysis}
         if source == "bmkg" and bmkg_3h is None:
@@ -769,7 +744,10 @@ def pipeline_node(archive, node_id, sample_rows=True):
     directory = archive.root / dataset
     if dataset == "models":
         version = config.settings()["model"]["live_version"]
-        card = read_json(directory / version / "card.json") or {}
+        try:
+            card = model_card(archive.root, version)
+        except FileNotFoundError:
+            card = {}
         return {
             "versions": sorted(path.name for path in directory.glob("*") if path.is_dir()),
             "live": {key: card[key] for key in ("version", "created_at") if key in card},

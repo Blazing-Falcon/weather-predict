@@ -4,6 +4,7 @@ import h5py
 import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
+import pytest
 from PIL import Image
 
 from nowcast import config
@@ -194,8 +195,9 @@ def test_frames_rebuild_whole_dates_and_compare_bmkg_window(tmp_path, monkeypatc
         if row["slot"] == T + HALF and row["area_id"] == 1
     }
     assert next_slot == {"bmkg": 100, "bmkg_code": 60, "bmkg_step": 30, "bmkg_age": 0}
+    # No step of the newest run covers this slot, so BMKG has no value rather than "dry".
     assert {row["layer"]: row["value"] for row in rows
-            if row["slot"] == now and row["area_id"] == 1} == {"bmkg": 0}
+            if row["slot"] == now and row["area_id"] == 1} == {}
     assert frames.rebuild(tmp_path, now, 2) == result
     assert part.read_bytes() == before
     older_bytes = earlier.read_bytes()
@@ -269,3 +271,35 @@ def test_gauge_check_contingency(tmp_path):
         "misses": 0,
         "correct_negatives": 1,
     }
+
+
+@pytest.mark.parametrize("valid", [T - 4 * HOUR, T + 4 * HOUR])
+def test_frames_newest_bmkg_run_without_covering_step(tmp_path, monkeypatch, valid):
+    monkeypatch.setitem(config.settings()["bmkg"], "step_alignment", "after")
+    write(
+        tmp_path / "silver" / "bmkg_forecast",
+        [
+            {
+                "area_id": 1,
+                "analysis_time": analysis,
+                "first_seen": seen,
+                "valid_time": step,
+                "weather": 60,
+            }
+            for analysis, seen, step in (
+                (T - 6 * HOUR, T - 6 * HOUR, T),
+                (T - 3 * HOUR, T, valid),
+                (T, T + HALF, T),
+            )
+        ],
+        bmkg.SCHEMA,
+    )
+    write(
+        tmp_path / "gold" / "predictions",
+        [{"t": T, "area_id": 1, "lead_h": 3, "model_version": "v", "prob_pct": 80}],
+        score.SCHEMA,
+    )
+    assert frames.rebuild(tmp_path, T, 1)[0] == 1
+    part = tmp_path / "gold" / "map_frames" / f"date={T:%Y-%m-%d}" / "part.parquet"
+    rows = pq.ParquetFile(part).read().to_pylist()
+    assert {row["layer"]: row["value"] for row in rows if row["slot"] == T} == {"prob3": 80}

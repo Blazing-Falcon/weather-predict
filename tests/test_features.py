@@ -11,6 +11,7 @@ import pytest
 from nowcast import config
 from nowcast.cloud import CLOUD_SCHEMA
 from nowcast.features import build, climatology
+from nowcast.features import rows as features
 from nowcast.features.spark import spark_session
 from nowcast.registry.dim_area import SCHEMA as AREA_SCHEMA
 from nowcast.registry.neighbours import SCHEMA as EDGE_SCHEMA
@@ -115,8 +116,8 @@ def spark(silver):
 
 
 def test_available_imerg_slot():
-    assert build.available_imerg_slot(ISSUE, 360) == FIRST + 4 * HALF_HOUR
-    assert build.available_imerg_slot(ISSUE, LAG) == FIRST + 13 * HALF_HOUR
+    assert features.available_imerg_slot(ISSUE, 360) == FIRST + 4 * HALF_HOUR
+    assert features.available_imerg_slot(ISSUE, LAG) == FIRST + 13 * HALF_HOUR
 
 
 def test_issue_time_features(spark, silver, monkeypatch):
@@ -131,7 +132,7 @@ def test_issue_time_features(spark, silver, monkeypatch):
     climatology.climatology()
     clim_part = root / "gold" / "climatology" / "part.parquet"
     clim = pq.read_table(clim_part)
-    assert all(clim.schema.field(f"p{lead}").type == pa.uint8() for lead in build.LEADS)
+    assert all(clim.schema.field(f"p{lead}").type == pa.uint8() for lead in features.LEADS)
     assert clim.schema.field("n").type == pa.int32()
     climate_cells = {(r["area_id"], r["month"], r["hour_local"]): r for r in clim.to_pylist()}
     assert climate_cells[1, 1, 15]["p1"] == 100
@@ -152,14 +153,14 @@ def test_issue_time_features(spark, silver, monkeypatch):
         r["cloud_slot"] == t and r["imerg_slot"] <= t - timedelta(minutes=LAG)
         for (t, _), r in rows.items()
     )
-    assert all(table.schema.field(name).type == pa.int8() for name in build.TARGETS)
+    assert all(table.schema.field(name).type == pa.int8() for name in features.TARGETS)
     assert all(
-        table.schema.field(name).type == pa.float32() for name in build.FEATURES if name != "island"
+        table.schema.field(name).type == pa.float32() for name in features.FEATURES if name != "island"
     )
     expected = rows[ISSUE, 1]
-    assert [expected[name] for name in build.TARGETS] == [1, 1, 1]
-    assert [rows[ISSUE + 2 * HALF_HOUR, 1][name] for name in build.TARGETS] == [0, 1, None]
-    assert [rows[ISSUE + 4 * HALF_HOUR, 1][name] for name in build.TARGETS] == [1, None, None]
+    assert [expected[name] for name in features.TARGETS] == [1, 1, 1]
+    assert [rows[ISSUE + 2 * HALF_HOUR, 1][name] for name in features.TARGETS] == [0, 1, None]
+    assert [rows[ISSUE + 4 * HALF_HOUR, 1][name] for name in features.TARGETS] == [1, None, None]
     assert rows[SECOND - HALF_HOUR, 1]["y1"] == 1
     assert rows[SECOND, 1]["cold_trend_1h"] == 2
     assert rows[SECOND, 1]["nb_rain_lag"] == 2
@@ -178,7 +179,7 @@ def test_issue_time_features(spark, silver, monkeypatch):
     assert expected["clim_wet_pct"] == 31
     assert expected["clim_p1"] == 100
 
-    areas = build.admin_areas(spark, root).where("area_id = 1")
+    areas = features.admin_areas(spark, root).where("area_id = 1")
     climate = spark.read.parquet(str(clim_part)).selectExpr(
         "area_id",
         "month",
@@ -191,7 +192,7 @@ def test_issue_time_features(spark, silver, monkeypatch):
 
     def issue_features():
         return (
-            build.feature_rows(
+            features.feature_rows(
                 spark,
                 root,
                 areas,
@@ -201,12 +202,12 @@ def test_issue_time_features(spark, silver, monkeypatch):
                 LAG,
                 1,
             )
-            .select(*build.FEATURES)
+            .select(*features.FEATURES)
             .first()
             .asDict()
         )
 
-    expected_features = {name: expected[name] for name in build.FEATURES}
+    expected_features = {name: expected[name] for name in features.FEATURES}
     write_rows(
         rain_part,
         RAIN_SCHEMA,

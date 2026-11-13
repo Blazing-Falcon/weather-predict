@@ -279,3 +279,27 @@ def test_daily_scores(root):
     assert by_scope["province", "35", "clim"]["bss"] == 0
     assert scores_daily.write_day(root, T.date()) == 12
     assert score.read_rows(output) == first
+
+
+def test_hindcast_merges_new_keys_once_per_month(root, monkeypatch):
+    slots = [T - timedelta(hours=1) + index * HALF for index in range(4)]
+    write_slots(root, "cloud_kabkota", [cloud(slot, 0) for slot in slots], CLOUD_SCHEMA,
+                "part-himawari.parquet")
+    hindcast = root / "gold" / "hindcast"
+    write(score.partition(hindcast, T), [prediction(T, 1, 10)], score.SCHEMA)
+    asked = []
+
+    def predict(_, times):
+        asked.extend(times)
+        rows = [prediction(t, lead, 50) for t in times for lead in (1, 2)]
+        return pa.Table.from_pylist([{k: v for k, v in row.items() if k != "issued_at"} for row in rows]), {}
+
+    monkeypatch.setattr(score, "predict", predict)
+    score.hindcast(start=(T - HALF).isoformat(), end=(T + HALF).isoformat())
+
+    assert asked == [T, T + HALF]
+    january = pq.read_table(score.partition(hindcast, T)).to_pylist()
+    february = pq.read_table(score.partition(hindcast, T + HALF)).to_pylist()
+    assert sorted((row["lead_h"], row["prob_pct"]) for row in january) == [(1, 10), (2, 50)]
+    assert next(row for row in january if row["lead_h"] == 1)["issued_at"] == ISSUED
+    assert sorted((row["t"], row["lead_h"]) for row in february) == [(T + HALF, 1), (T + HALF, 2)]

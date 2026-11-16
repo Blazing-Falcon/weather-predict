@@ -1,6 +1,6 @@
 # Plan: Fill the 30-Day Replay
 
-Status: planned on 2026-11-21, not run. Every step writes to `data/`, so it needs juan's OK.
+Status: run on 2026-11-21 with juan's OK. Results at the end.
 
 ## Goal
 
@@ -36,3 +36,19 @@ Times are UTC. Each command takes the same locks as the live loops, so the loops
 - A stopped run can be started again, because fills merge by slot. After a power cut, remove a stale `part.parquet.tmp` first, as the 10-year backfill showed.
 - Live loops: none is stopped or restarted. During step 1, IMERG ticks are late by the length of that step.
 - Running steps 1 to 4 as one chained script in the background means one log to watch (`data/tmp/replay-fill.log`).
+
+## Results (2026-11-21)
+
+| Step | Time | Peak memory | Result |
+|---|---|---|---|
+| IMERG fill | 4 min 34 s | not measured | silver rain gap filled; 0 gaps since 21 Oct |
+| Himawari fill | 1 h 3 min | 1.7 GB | 1,345 slots, cloud per area and cloud tiles |
+| Hindcast, first run | 3 h 36 min | 2.3 GB, then killed for memory | written through 16 Nov 11:00 UTC |
+| Hindcast, rest (after fix `71d4555`) | 15 s | 0.7 GB | 77 slots |
+| Map frames, 32 days | 24 s | 1.9 GB | 4.0 million rows |
+
+The first hindcast run was slow and ran out of memory because its write loop read and rewrote the whole month partition for every slot. Commit `71d4555` merges each month once. The kernel also stopped two other user processes (`hermes`) during the memory shortage at 09:21 UTC.
+
+Coverage of the 30-day window (from 22 Oct 04:00 UTC): obs 1,440 slots, cold 1,446, prob1 to prob3 1,439 each, 1,448 rain tiles and 1,589 cloud tiles. The few single missing forecast slots are half-hours without a Himawari scan one hour earlier. BMKG and Model vs BMKG start on 20 Nov, as expected.
+
+Two app fixes came out of the check (`8954eb6`): `/api/meta` listed only 7 days of tiles, so old frames said no cloud image was archived, and long windows did not load observed rain for the drawer. `/api/meta` is now 251 KB raw and 51 KB with gzip, polled every 60 s.

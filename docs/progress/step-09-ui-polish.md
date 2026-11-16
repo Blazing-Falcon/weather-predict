@@ -26,6 +26,7 @@ Date: 2026-11-20. Input: `docs/ui-audit.md` (26 findings). juan picked A01 to A1
 | The slider ends at the latest issue. The 3 h forward part is gone, because its frames only showed the same issue at leads 1 to 3. A "Next 1 h / 2 h / 3 h" toggle picks the lead for every frame, past and latest. A Replay select offers 48 h, 7 days and 30 days, and long windows load only the shown layers. The Overview and drawer charts show the last 48 h. The API frame cap and the map frame and tile retention rise to 31 days. | `1c0f692` |
 | On the BMKG layer the tooltip names the BMKG forecast, its 3 h step and its run ("Hujan Ringan · Light Rain", "BMKG 08:30–11:30 WIB, run 20 Nov 19:00 WIB"). Map frames add `bmkg_code`, `bmkg_step` and `bmkg_age` from the same run and step as the `bmkg` layer. Alerts gain a "Source: Our model / BMKG" switch: the BMKG list holds every area whose latest run has rain in the next 3 h (334 areas for the 21 Nov 11:00 WIB issue), ranked Hujan Petir, Lebat, Sedang, Ringan, with our probabilities beside them and no Waspada, Siaga or Awas. | `0bef462` |
 | Yearly rain tags El Niño (EN) and La Niña (LN) years from NOAA's Relative Oceanic Niño Index (RONI), the official index since February 2026 (`config/enso/roni.csv`, read 2026-11-21, updated by hand). A year is tagged when a 5-season episode at ±0.5 °C covers at least 3 of its June to November seasons: LN 2016, 2017, 2020 to 2022, 2024, 2025; EN 2023 and 2026 (provisional, "EN?"). The three History footnotes and the `wet_season_rule` field are gone. The 130-row IMERG backfill table on Pipeline is closed by default behind "130 months, 2016-01 to 2026-10, all complete". | `72c5aff` |
+| The 30-day replay has data for the whole window: IMERG and Himawari fills, a 4-week hindcast and a 32-day frame rebuild (`docs/plans/replay-fill.md`). `/api/meta` lists 31 days of tiles, and long windows load observed rain for the drawer. The hindcast write loop now merges each month once (3.6 h and two out-of-memory kills before, 15 s for the rest after). | `71d4555`, `8954eb6` |
 
 ## Verification
 
@@ -36,7 +37,6 @@ Date: 2026-11-20. Input: `docs/ui-audit.md` (26 findings). juan picked A01 to A1
 
 ## Open Points
 
-- The 30-day replay has data only from 18 Nov 2026. Older days need the 1 to 17 Nov rain and cloud gap filled, about 30 days of hindcast, and one `nowcast gold frames --days 31` run (writes to `data/`, needs juan's OK).
 - Pass 2, the "How it works" explanation page, was merged and then reverted on juan's request (2026-11-21). Its branch `claude/explain-page-36c065` keeps the work.
 - The lead toggle sits in the left legend card, so the left stack at 1440 × 900 now overflows its scroll box by more than the 14 px in A15 (the credits line is hidden until you scroll).
 - A13 to A26 (raster failure note, legends, clipped credits on the 1440 px left card, drawer chart keys, time zones on day changes, Pipeline mobile order, slider `aria-valuetext`, first paint, Model KPI labels and the low items).

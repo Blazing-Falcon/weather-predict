@@ -40,19 +40,14 @@ def wilayah_mismatches():
     return len(aliases), mismatches
 
 
-def run(wilayah: bool) -> bool:
-    ok = True
+def _check_line(name, passed, detail):
+    return f"{'PASS' if passed else 'FAIL'} {name} {detail}"
 
-    def report(name, passed, detail):
-        nonlocal ok
-        print(f"{'PASS' if passed else 'FAIL'} {name} {detail}", flush=True)
-        ok = ok and passed
 
-    ref = paths.zone("ref")
-    areas = pq.read_table(ref / "dim_area.parquet").to_pandas().set_index("area_id")
+def _dim_area_line(areas):
     admin = areas[areas["is_admin"].eq(True)]
     non_admin = areas[areas["is_admin"].eq(False)]
-    report(
+    return _check_line(
         "dim_area",
         len(areas) == 519
         and len(admin) == 514
@@ -62,24 +57,29 @@ def run(wilayah: bool) -> bool:
         f"({', '.join(non_admin['geo_name'])})",
     )
 
-    for grid in (imerg_grid(), mergir_grid()):
-        membership = pq.read_table(ref / f"{grid.name}_membership.parquet").to_pandas()
-        counts = membership.groupby("area_id").size().reindex(admin.index, fill_value=0)
-        report(
-            f"{grid.name}_cells",
-            counts.min() > 0,
-            f"min={counts.min():g} median={counts.median():g}",
-        )
-        cell_km2 = grid.cell_km2[membership["cell"].to_numpy() // grid.width]
-        covered = (membership["weight"] * cell_km2).groupby(membership["area_id"]).sum()
-        errors = (covered.reindex(admin.index, fill_value=0) / admin["area_km2"] - 1).abs() * 100
-        worst = admin.loc[errors.idxmax(), "geo_name"] if len(errors) else "none"
-        report(
-            f"{grid.name}_weights",
-            len(errors) > 0 and errors.le(2).all(),
-            f"max_error={errors.max():.4f}% worst={worst}",
-        )
 
+def _cell_count_line(grid, membership, admin):
+    counts = membership.groupby("area_id").size().reindex(admin.index, fill_value=0)
+    return _check_line(
+        f"{grid.name}_cells",
+        counts.min() > 0,
+        f"min={counts.min():g} median={counts.median():g}",
+    )
+
+
+def _weight_line(grid, membership, admin):
+    cell_km2 = grid.cell_km2[membership["cell"].to_numpy() // grid.width]
+    covered = (membership["weight"] * cell_km2).groupby(membership["area_id"]).sum()
+    errors = (covered.reindex(admin.index, fill_value=0) / admin["area_km2"] - 1).abs() * 100
+    worst = admin.loc[errors.idxmax(), "geo_name"] if len(errors) else "none"
+    return _check_line(
+        f"{grid.name}_weights",
+        len(errors) > 0 and errors.le(2).all(),
+        f"max_error={errors.max():.4f}% worst={worst}",
+    )
+
+
+def _bmkg_picks_line(ref, areas, admin):
     picks = areas[areas["bmkg_adm4"].notna()]
     missing = int(admin["bmkg_adm4"].isna().sum())
     own_inside = invalid_outside = unknown = 0
@@ -127,7 +127,7 @@ def run(wilayah: bool) -> bool:
             for area_id, km in near_km[near_km <= NEAR_LIMIT_KM].items()
         ]
         invalid_outside = int((~inside).sum()) - len(near)
-    report(
+    return _check_line(
         "bmkg_picks",
         missing == invalid_outside == unknown == 0,
         f"picked={len(picks)} own_inside={own_inside} other_area={len(other_area)} near={len(near)} "
@@ -136,20 +136,46 @@ def run(wilayah: bool) -> bool:
         f"near_to_polygon=[{', '.join(near)}]",
     )
 
+
+def _neighbours_line(ref, admin):
     links = pq.read_table(
         ref / "neighbours.parquet", columns=["area_id", "neighbour_id"]
     ).to_pandas()
     linked = links.loc[links["area_id"] != links["neighbour_id"], "area_id"]
     no_neighbour = int((~admin.index.isin(linked)).sum())
-    report("neighbours", no_neighbour == 0, f"admin={len(admin)} missing={no_neighbour}")
+    return _check_line("neighbours", no_neighbour == 0, f"admin={len(admin)} missing={no_neighbour}")
 
-    if wilayah:
-        count, mismatches = wilayah_mismatches()
-        for mismatch in mismatches:
-            report("wilayah", False, mismatch)
-        report(
+
+def _wilayah_lines():
+    count, mismatches = wilayah_mismatches()
+    return [
+        *(_check_line("wilayah", False, mismatch) for mismatch in mismatches),
+        _check_line(
             "wilayah",
             count == 29 and not mismatches,
             f"matched={count - len(mismatches)}/{count} expected=29",
-        )
+        ),
+    ]
+
+
+def _registry_lines(ref, areas, wilayah):
+    admin = areas[areas["is_admin"].eq(True)]
+    yield _dim_area_line(areas)
+    for grid in (imerg_grid(), mergir_grid()):
+        membership = pq.read_table(ref / f"{grid.name}_membership.parquet").to_pandas()
+        yield _cell_count_line(grid, membership, admin)
+        yield _weight_line(grid, membership, admin)
+    yield _bmkg_picks_line(ref, areas, admin)
+    yield _neighbours_line(ref, admin)
+    if wilayah:
+        yield from _wilayah_lines()
+
+
+def run(wilayah: bool) -> bool:
+    ref = paths.zone("ref")
+    areas = pq.read_table(ref / "dim_area.parquet").to_pandas().set_index("area_id")
+    ok = True
+    for line in _registry_lines(ref, areas, wilayah):
+        print(line, flush=True)
+        ok = ok and line.startswith("PASS ")
     return ok

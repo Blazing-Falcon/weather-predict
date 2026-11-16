@@ -243,6 +243,27 @@ def download_ghcnh(
     return path, response.num_bytes_downloaded
 
 
+def _collect_ghcnh(stations, year, month, bronze):
+    rows = []
+    downloaded = failures = 0
+    completed = []
+    with http.client(timeout=60) as client, ThreadPoolExecutor(max_workers=4) as executor:
+        fetch = partial(download_ghcnh, client=client, year=year, bronze=bronze)
+        jobs = {executor.submit(fetch, station): station for station in stations}
+        for job, station in jobs.items():
+            try:
+                path, size = job.result()
+            except httpx.HTTPError as error:
+                get_logger(__name__).error("ghcnh %s %04d: %s", station, year, error)
+                failures += 1
+                continue
+            if path is not None:
+                downloaded += size
+                rows.extend(parse_ghcnh(path, year, month))
+                completed.append(path)
+    return rows, downloaded, completed, failures
+
+
 def ghcnh(
     year: Annotated[int, typer.Option(min=1, max=9999)],
     month: Annotated[int | None, typer.Option(min=1, max=12)] = None,
@@ -256,23 +277,7 @@ def ghcnh(
     bronze = paths.zone("bronze") / "gauges" / "ghcnh" / f"date={datetime.now(UTC):%Y-%m-%d}"
     bronze.mkdir(parents=True, exist_ok=True)
     with directory_lock(bronze):
-        rows = []
-        downloaded = failures = 0
-        completed = []
-        with http.client(timeout=60) as client, ThreadPoolExecutor(max_workers=4) as executor:
-            fetch = partial(download_ghcnh, client=client, year=year, bronze=bronze)
-            jobs = {executor.submit(fetch, station): station for station in stations}
-            for job, station in jobs.items():
-                try:
-                    path, size = job.result()
-                except httpx.HTTPError as error:
-                    get_logger(__name__).error("ghcnh %s %04d: %s", station, year, error)
-                    failures += 1
-                    continue
-                if path is not None:
-                    downloaded += size
-                    rows.extend(parse_ghcnh(path, year, month))
-                    completed.append(path)
+        rows, downloaded, completed, failures = _collect_ghcnh(stations, year, month, bronze)
         reports = publish("ghcnh", rows, len(stations), downloaded)
         for path in completed:
             path.unlink()
@@ -286,38 +291,58 @@ def ghcnh(
         } if month is not None else reports
 
 
-def metar() -> dict:
-    """Archive the latest three hours of Indonesian METARs."""
-    with (GEO / METAR_STATIONS).open(encoding="utf-8", newline="") as file:
-        stations = [row["icao"] for row in csv.DictReader(file)]
+def _download_metar(client, batch):
+    response = http.get(
+        client,
+        f"{AWC}/metar",
+        params={"ids": ",".join(batch), "format": "json", "hours": 3},
+    ).raise_for_status()
+    if response.status_code == 204:
+        return None
+    fetched = datetime.now(UTC)
+    bronze = paths.zone("bronze") / "gauges" / "metar" / f"date={fetched:%Y-%m-%d}"
+    bronze.mkdir(parents=True, exist_ok=True)
+    path = bronze / f"{fetched:%Y%m%dT%H%M%S.%fZ}.json"
+    write_bytes(path, response.content)
+    return response, fetched, path.stat().st_size
 
+
+def _metar_report(rows, fetched, size):
+    report = {"reports": len(rows), "bronze_bytes": size}
+    if rows:
+        newest = max(row["obs_time"] for row in rows)
+        report["bronze_latency_min"] = (fetched - newest).total_seconds() / 60
+    return report
+
+
+def _collect_metar(stations):
     rows = {}
     downloaded = 0
     reports = {}
     with http.client() as client:
         for batch in batched(stations, 100):
-            response = http.get(
-                client,
-                f"{AWC}/metar",
-                params={"ids": ",".join(batch), "format": "json", "hours": 3},
-            ).raise_for_status()
-            if response.status_code == 204:
+            result = _download_metar(client, batch)
+            if result is None:
                 continue
-            fetched = datetime.now(UTC)
-            bronze = paths.zone("bronze") / "gauges" / "metar" / f"date={fetched:%Y-%m-%d}"
-            bronze.mkdir(parents=True, exist_ok=True)
-            path = bronze / f"{fetched:%Y%m%dT%H%M%S.%fZ}.json"
-            write_bytes(path, response.content)
+            response, fetched, size = result
             downloaded += response.num_bytes_downloaded
             parsed = parse_metar(response.json())
+            summary = _metar_report(parsed, fetched, size)
             report = reports.setdefault(f"{fetched:%Y-%m}", {"reports": 0, "bronze_bytes": 0})
-            report["reports"] += len(parsed)
-            report["bronze_bytes"] += path.stat().st_size
-            if parsed:
-                newest = max(row["obs_time"] for row in parsed)
-                report["bronze_latency_min"] = (fetched - newest).total_seconds() / 60
+            report["reports"] += summary["reports"]
+            report["bronze_bytes"] += summary["bronze_bytes"]
+            if "bronze_latency_min" in summary:
+                report["bronze_latency_min"] = summary["bronze_latency_min"]
             for row in parsed:
                 rows[row["station_id"], row["obs_time"]] = row
-    for month, summary in publish("metar", list(rows.values()), len(stations), downloaded).items():
+    return list(rows.values()), downloaded, reports
+
+
+def metar() -> dict:
+    """Archive the latest three hours of Indonesian METARs."""
+    with (GEO / METAR_STATIONS).open(encoding="utf-8", newline="") as file:
+        stations = [row["icao"] for row in csv.DictReader(file)]
+    rows, downloaded, reports = _collect_metar(stations)
+    for month, summary in publish("metar", rows, len(stations), downloaded).items():
         reports.setdefault(month, {}).update(summary)
     return reports

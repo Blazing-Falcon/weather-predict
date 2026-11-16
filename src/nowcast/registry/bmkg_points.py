@@ -73,10 +73,7 @@ def candidate(kecamatan, wilayah_client, bmkg_client, bmkg_url, max_tries=3):
     return record | {"error": error}
 
 
-def sweep(limit: int | None, max_tries: int = 3) -> None:
-    bmkg = config.settings()["bmkg"]
-    rpm = request_rate()
-
+def _sweep_inputs():
     geo = config.CONFIG_DIR / "geo"
     with (geo / "kabkota_codes.csv").open(encoding="utf-8", newline="") as source:
         area_ids = {
@@ -87,54 +84,72 @@ def sweep(limit: int | None, max_tries: int = 3) -> None:
     with (geo / "kecamatan.csv").open(encoding="utf-8", newline="") as source:
         kecamatan = list(csv.DictReader(source))
 
+    return area_ids, kecamatan
+
+
+def _resume_candidates(history):
+    latest = {}
+    history.seek(0)
+    while line := history.readline():
+        # A kill can leave a partial final line. Keep all newline-terminated records.
+        if not line.endswith(b"\n"):
+            history.truncate(history.tell() - len(line))
+            break
+        record = json.loads(line)
+        latest[record["kecamatan_code"]] = record["adm4"]
+
+    return latest
+
+
+def _collect_candidates(history, batch, area_ids, url, rpm, max_tries):
+    logger = get_logger(__name__)
+    done = failed = 0
+    started = monotonic()
+    with http.client() as wilayah_client, http.client() as bmkg_client:
+        wilayah_client.event_hooks["request"].append(
+            rate_limit(1 / 5, monotonic=monotonic, sleep=sleep)
+        )
+        bmkg_client.event_hooks["request"].append(
+            rate_limit(60 / rpm, monotonic=monotonic, sleep=sleep)
+        )
+
+        for processed, row in enumerate(batch, start=1):
+            code = row["kecamatan_code"]
+            kabkota = row["kabkota_code"]
+            record = {
+                "kecamatan_code": code,
+                "kabkota_code": kabkota,
+                "area_id": area_ids[kabkota],
+                **candidate(code, wilayah_client, bmkg_client, url, max_tries),
+                "fetched_at": utc_now(),
+            }
+            history.write((json.dumps(record, ensure_ascii=False) + "\n").encode("utf-8"))
+            history.flush()
+            if record["adm4"] is None:
+                failed += 1
+            else:
+                done += 1
+            if processed % 100 == 0:
+                eta = (monotonic() - started) / processed * (len(batch) - processed)
+                logger.info("done=%d failed=%d eta=%.0fs", done, failed, eta)
+
+    return done, failed
+
+
+def sweep(limit: int | None, max_tries: int = 3) -> None:
+    bmkg = config.settings()["bmkg"]
+    rpm = request_rate()
+    area_ids, kecamatan = _sweep_inputs()
     output = paths.zone("state") / "registry" / "bmkg_candidates.jsonl"
     output.parent.mkdir(parents=True, exist_ok=True)
-    logger = get_logger(__name__)
-    latest = {}
     with output.open("a+b") as history:
-        history.seek(0)
-        while line := history.readline():
-            # A kill can leave a partial final line. Keep all newline-terminated records.
-            if not line.endswith(b"\n"):
-                history.truncate(history.tell() - len(line))
-                break
-            record = json.loads(line)
-            latest[record["kecamatan_code"]] = record["adm4"]
-
+        latest = _resume_candidates(history)
         pending = [row for row in kecamatan if latest.get(row["kecamatan_code"]) is None]
         skipped = len(kecamatan) - len(pending)
         batch = pending[:limit]
-        done = failed = 0
-        started = monotonic()
-        with http.client() as wilayah_client, http.client() as bmkg_client:
-            wilayah_client.event_hooks["request"].append(
-                rate_limit(1 / 5, monotonic=monotonic, sleep=sleep)
-            )
-            bmkg_client.event_hooks["request"].append(
-                rate_limit(60 / rpm, monotonic=monotonic, sleep=sleep)
-            )
+        done, failed = _collect_candidates(history, batch, area_ids, bmkg["url"], rpm, max_tries)
 
-            for processed, row in enumerate(batch, start=1):
-                code = row["kecamatan_code"]
-                kabkota = row["kabkota_code"]
-                record = {
-                    "kecamatan_code": code,
-                    "kabkota_code": kabkota,
-                    "area_id": area_ids[kabkota],
-                    **candidate(code, wilayah_client, bmkg_client, bmkg["url"], max_tries),
-                    "fetched_at": utc_now(),
-                }
-                history.write((json.dumps(record, ensure_ascii=False) + "\n").encode("utf-8"))
-                history.flush()
-                if record["adm4"] is None:
-                    failed += 1
-                else:
-                    done += 1
-                if processed % 100 == 0:
-                    eta = (monotonic() - started) / processed * (len(batch) - processed)
-                    logger.info("done=%d failed=%d eta=%.0fs", done, failed, eta)
-
-    logger.info(
+    get_logger(__name__).info(
         "BMKG candidates done=%d failed=%d skipped=%d deferred=%d",
         done,
         failed,
@@ -182,9 +197,7 @@ def pick_candidates(areas, candidates):
     return picks
 
 
-def build_picks() -> None:
-    ref = paths.zone("ref")
-    history = paths.zone("state") / "registry" / "bmkg_candidates.jsonl"
+def _candidate_table(history):
     with history.open(encoding="utf-8") as source:
         latest = {row["kecamatan_code"]: row for row in map(json.loads, source)}
     failed = sorted(code for code, row in latest.items() if row["adm4"] is None)
@@ -203,23 +216,14 @@ def build_picks() -> None:
     table = pa.Table.from_pylist(rows, schema=CANDIDATE_SCHEMA).sort_by(
         [("area_id", "ascending"), ("kecamatan_code", "ascending")]
     )
-    write_table(table, ref / "bmkg_candidates.parquet")
+    return table, failed
 
-    logger = get_logger(__name__)
-    logger.info(
-        "BMKG candidates ok=%d failed=%d, failed kecamatan: %s",
-        len(rows),
-        len(failed),
-        ", ".join(failed) or "none",
-    )
-    areas = admin_areas([])
-    picks = pick_candidates(areas, table.to_pylist())
-    dimension = ref / "dim_area.parquet"
-    dim = pq.read_table(dimension)
-    records = dim.to_pylist()
+
+def _assign_picks(records, picks):
     distances = []
     fallback = 0
     near = 0
+    logger = get_logger(__name__)
     for row in records:
         pick = picks.get(row["area_id"])
         row.update(bmkg_adm4=None, bmkg_lon=None, bmkg_lat=None)
@@ -256,6 +260,29 @@ def build_picks() -> None:
                 candidate["adm4"],
                 polygon_km,
             )
+
+    return distances, fallback, near
+
+
+def build_picks() -> None:
+    ref = paths.zone("ref")
+    history = paths.zone("state") / "registry" / "bmkg_candidates.jsonl"
+    table, failed = _candidate_table(history)
+    write_table(table, ref / "bmkg_candidates.parquet")
+
+    logger = get_logger(__name__)
+    logger.info(
+        "BMKG candidates ok=%d failed=%d, failed kecamatan: %s",
+        len(table),
+        len(failed),
+        ", ".join(failed) or "none",
+    )
+    areas = admin_areas([])
+    picks = pick_candidates(areas, table.to_pylist())
+    dimension = ref / "dim_area.parquet"
+    dim = pq.read_table(dimension)
+    records = dim.to_pylist()
+    distances, fallback, near = _assign_picks(records, picks)
 
     write_table(pa.Table.from_pylist(records, schema=dim.schema), dimension)
     logger.info(

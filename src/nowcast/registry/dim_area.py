@@ -47,9 +47,7 @@ def island_and_tz(prov_code: str) -> tuple[str, str]:
     raise ValueError(f"Unknown province code {prov_code!r}")
 
 
-def build() -> None:
-    geo = config.CONFIG_DIR / "geo"
-    ref = paths.zone("ref")
+def _read_codes(geo):
     with (geo / "kabkota_codes.csv").open(encoding="utf-8", newline="") as source:
         rows = sorted(csv.DictReader(source), key=lambda row: int(row["area_id"]))
     if len(rows) != 519:
@@ -63,6 +61,10 @@ def build() -> None:
     if len(admin_codes) != 514 or not all(admin_codes) or len(set(admin_codes)) != len(admin_codes):
         raise ValueError("Expected 514 admin rows with unique nonempty kemendagri codes")
 
+    return rows, names
+
+
+def _read_polygons(geo, ref, names):
     full = gpd.read_file(ref / BOUNDARIES_NAME)
     if "shapeName" not in full:
         raise ValueError(f"{BOUNDARIES_NAME} is missing the shapeName property")
@@ -91,6 +93,10 @@ def build() -> None:
     if not display_polygons.geom_type.isin(("Polygon", "MultiPolygon")).all():
         raise ValueError("Display features must all contain polygon geometry")
 
+    return polygons, display_polygons
+
+
+def _area_records(rows, polygons):
     centroids = polygons.centroid
     lon_lat = centroids.to_crs(4326)
     area = polygons.area
@@ -123,18 +129,30 @@ def build() -> None:
             }
         )
 
-    output = ref / "dim_area.parquet"
-    write_table(pa.Table.from_pylist(records, schema=SCHEMA), output)
+    return records
 
+
+def _report_area_difference(names, area, display_polygons):
     difference = (display_polygons.area - area).abs() / area * 100
     largest = ", ".join(
         f"{names[area_id]} ({percent:.2f}%)" for area_id, percent in difference.nlargest(5).items()
     )
     logger = get_logger(__name__)
-    logger.info("Wrote %s (%d rows)", output, len(records))
     logger.info(
         "Full-resolution vs display area difference: median %.2f%%, max %.2f%%. Largest: %s",
         difference.median(),
         difference.max(),
         largest,
     )
+
+
+def build() -> None:
+    geo = config.CONFIG_DIR / "geo"
+    ref = paths.zone("ref")
+    rows, names = _read_codes(geo)
+    polygons, display_polygons = _read_polygons(geo, ref, names)
+    records = _area_records(rows, polygons)
+    output = ref / "dim_area.parquet"
+    write_table(pa.Table.from_pylist(records, schema=SCHEMA), output)
+    get_logger(__name__).info("Wrote %s (%d rows)", output, len(records))
+    _report_area_difference(names, polygons.area, display_polygons)

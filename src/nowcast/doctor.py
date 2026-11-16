@@ -10,13 +10,13 @@ from concurrent.futures import ThreadPoolExecutor, wait
 from datetime import UTC, datetime, timedelta
 from tempfile import NamedTemporaryFile
 from time import monotonic
-from urllib.parse import quote
 
 import httpx
 import typer
 
 from nowcast import config, http, paths
 from nowcast.log import redact
+from nowcast.sources.earthdata import dap4_url
 from nowcast.sources.himawari import segment_prefix
 
 TIMEOUT = 20.0
@@ -116,8 +116,7 @@ def gesdisc(request):
     for axis in ("lon", "lat"):
         first, last = settings[f"{axis}_index"]
         constraint += f"[{first}:1:{last}]"
-    title = quote(granule["title"], safe=":")
-    url = f"{settings['opendap']}{title}.dap.nc4?dap4.ce={quote(constraint, safe='/:')}"
+    url = dap4_url(settings, granule["title"], constraint, title_safe=":")
     response = request(url, auth=True)
     if response.status_code == 200:
         return "PASS", f"HTTP 200, {len(response.content)} bytes"

@@ -89,7 +89,7 @@ def open_map(browser, width, height):
         )
     page.goto(BASE + "/", timeout=30000)
     expect(page.locator("#view-map")).to_have_attribute("aria-busy", "false", timeout=30000)
-    page.wait_for_function("map.loaded()")
+    page.wait_for_function("() => map.loaded()")
     if page.locator("#drawer").is_visible():
         page.get_by_role("button", name="Close area panel").click()
     page.evaluate(RENDER_LOG, CLIP)
@@ -97,7 +97,7 @@ def open_map(browser, width, height):
 
 
 def settle(page):
-    page.wait_for_function("map.loaded() && !map.isMoving()")
+    page.wait_for_function("() => map.loaded() && !map.isMoving()")
     page.wait_for_timeout(150)
 
 
@@ -173,7 +173,7 @@ def rain_grid(page, out, last_obs):
     missing, rows = [], []
     for index in range(last_obs + 1):
         page.evaluate(f"setFrame({index})")
-        page.wait_for_function("map.loaded()")
+        page.wait_for_function("() => map.loaded()")
         page.wait_for_timeout(250)
         # The 60 s refresh can move the timeline, so read the slot and its tile from the page.
         slot = page.evaluate("""() => {
@@ -227,7 +227,7 @@ def refresh(playwright):
         page.goto(BASE + ("/" if view == "map" else "/#overview"))
         expect(page.locator(f"#view-{view}")).to_have_attribute("aria-busy", "false", timeout=30000)
         if view == "map":
-            page.wait_for_function("map.loaded()")
+            page.wait_for_function("() => map.loaded()")
             page.evaluate(RENDER_LOG, CLIP)
             page.evaluate("setFrame(60)")
         else:

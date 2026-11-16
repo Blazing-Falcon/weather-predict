@@ -28,7 +28,7 @@ def capture_map_states(page, shots, width):
     if page.locator("#drawer").is_visible():
         page.get_by_role("button", name="Close area panel").click()
     page.get_by_role("button", name="Jawa Timur").click()
-    page.wait_for_function("!map.isMoving()")
+    page.wait_for_function("() => !map.isMoving()")
     point = page.evaluate(
         """() => {
             const area = areaById.get(malangId);
@@ -102,7 +102,7 @@ def main():
                     expect(page.locator("#dataStatus")).to_be_hidden()
                     if name == "map":
                         expect(page.locator("#map canvas.maplibregl-canvas")).to_be_visible()
-                        page.wait_for_function("map.loaded()")
+                        page.wait_for_function("() => map.loaded()")
                     if name.startswith("pipeline/"):
                         expect(page.locator("#plExplain")).to_be_visible()
                         expect(page.locator("#plExplain")).not_to_contain_text(

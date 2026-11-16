@@ -372,3 +372,27 @@ def test_bmkg_read_bound_filters_old_runs_in_same_partition(root, monkeypatch):
     runs = bmkg_baseline.read_runs(root, T, T + HALF, "after")
     assert [row["analysis_time"] for row in loaded] == [newest]
     assert bmkg_baseline.bmkg_result(runs[1], ISSUED, T, T + HALF, 60) == (True, newest)
+
+
+def test_hindcast_merges_new_keys_once_per_month(root, monkeypatch):
+    slots = [T - timedelta(hours=1) + index * HALF for index in range(4)]
+    write_slots(root, "cloud_kabkota", [cloud(slot, 0) for slot in slots], CLOUD_SCHEMA,
+                "part-himawari.parquet")
+    hindcast = root / "gold" / "hindcast"
+    write(month_path(hindcast, T, "part.parquet"), [prediction(T, 1, 10)], score.SCHEMA)
+    asked = []
+
+    def predict(_, times):
+        asked.extend(times)
+        rows = [prediction(t, lead, 50) for t in times for lead in (1, 2)]
+        return pa.Table.from_pylist([{k: v for k, v in row.items() if k != "issued_at"} for row in rows]), {}
+
+    monkeypatch.setattr(score, "predict", predict)
+    score.hindcast(start=(T - HALF).isoformat(), end=(T + HALF).isoformat())
+
+    assert asked == [T, T + HALF]
+    january = pq.read_table(month_path(hindcast, T, "part.parquet")).to_pylist()
+    february = pq.read_table(month_path(hindcast, T + HALF, "part.parquet")).to_pylist()
+    assert sorted((row["lead_h"], row["prob_pct"]) for row in january) == [(1, 10), (2, 50)]
+    assert next(row for row in january if row["lead_h"] == 1)["issued_at"] == ISSUED
+    assert sorted((row["t"], row["lead_h"]) for row in february) == [(T + HALF, 1), (T + HALF, 2)]

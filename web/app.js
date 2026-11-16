@@ -257,7 +257,7 @@ async function loadFrames(hours, ...layers) {
 
 function loadMapFrames() {
   const layers = settings.replay === 48 ? ["prob1", "prob2", "prob3", "obs", "cold", "bmkg", "disagree"]
-    : [layerData[layer], ...(cloudsOn ? ["cold"] : [])];
+    : [...new Set([layerData[layer], "obs", ...(cloudsOn ? ["cold"] : [])])];
   if (layer === "bm") layers.push("bmkg_code", "bmkg_step", "bmkg_age");
   return loadFrames(settings.replay, ...layers);
 }

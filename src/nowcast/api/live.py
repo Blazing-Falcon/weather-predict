@@ -71,8 +71,8 @@ def meta(archive, now):
         "model_version": live if has_card(root, live) else None,
         "tile_bounds": read_json(root / "gold" / "tiles" / "bounds.json"),
         "tile_times": {
-            "rain": tile_times(root, "rain", ".png", now - timedelta(days=7)),
-            "cloud": tile_times(root, "cloud", ".webp", now - timedelta(days=7)),
+            "rain": tile_times(root, "rain", ".png", now - timedelta(days=31)),
+            "cloud": tile_times(root, "cloud", ".webp", now - timedelta(days=31)),
         },
         "areas": areas,
         "area_count": len(areas),

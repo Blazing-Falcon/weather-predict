@@ -8,6 +8,7 @@ import lightgbm as lgb
 import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
+import pyarrow.parquet as pq
 import typer
 
 from nowcast import config, paths, storage
@@ -220,19 +221,21 @@ def hindcast(
         get_logger(__name__).info("No Himawari slots to hindcast")
         return
     table, _ = predict(root, pending)
-    issued_at = datetime.now(UTC)
+    table = table.append_column("issued_at", pa.array([datetime.now(UTC)] * len(table), UTC_US))
+    table = table.select(SCHEMA.names).cast(SCHEMA)
+    keys = ["t", "area_id", "lead_h", "model_version"]
     count = 0
-    for t in pending:
-        part = month_path(root / "gold" / "hindcast", t, "part.parquet")
-        existing = read_rows(part)
-        keys = {KEY(row) for row in existing}
-        new = [
-            row | {"issued_at": issued_at}
-            for row in table.filter(pc.equal(table["t"], pa.scalar(t))).to_pylist()
-            if KEY(row) not in keys
-        ]
-        if new:
+    # One read and one write per month partition: a month holds over a million rows.
+    for part in sorted({month_path(root / "gold" / "hindcast", t, "part.parquet") for t in pending}):
+        month = [t for t in pending if month_path(root / "gold" / "hindcast", t, "part.parquet") == part]
+        new = table.filter(pc.is_in(table["t"], pa.array(month, UTC_US)))
+        if part.is_file():
+            existing = pq.read_table(part, partitioning=None).cast(SCHEMA)
+            new = new.join(existing.select(keys), keys=keys, join_type="left anti").select(SCHEMA.names)
+        else:
+            existing = SCHEMA.empty_table()
+        if len(new):
             part.parent.mkdir(parents=True, exist_ok=True)
-            storage.write_table(pa.Table.from_pylist(existing + new, schema=SCHEMA), part)
+            storage.write_table(pa.concat_tables([existing, new]), part)
             count += len(new)
     get_logger(__name__).info("Hindcast slots=%d rows=%d", len(pending), count)

@@ -113,6 +113,24 @@ def test_models_keeps_five_newest_folders(root):
     assert report["datasets"]["models"] == {"deleted_count": 2, "bytes_freed": 8}
 
 
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_models_keeps_older_live_version(root, monkeypatch, dry_run):
+    monkeypatch.setattr("nowcast.config.settings", lambda: {"model": {"live_version": "v6"}})
+    models = root / "models"
+    for day in range(7):
+        folder = write(models / f"v{day}/model").parent
+        stamp = (NOW - timedelta(days=day)).timestamp()
+        os.utime(folder, (stamp, stamp))
+
+    report = run_retention(root, *(["--dry-run"] if dry_run else []))
+
+    kept = {path.name for path in models.iterdir()}
+    assert kept == (
+        {f"v{i}" for i in range(7)} if dry_run else {"v0", "v1", "v2", "v3", "v4", "v6"}
+    )
+    assert report["datasets"]["models"] == {"deleted_count": 1, "bytes_freed": 4}
+
+
 def test_mtime_and_independent_nested_policy(root):
     tiles = root / "gold/tiles/rain"
     old = write(tiles / "old.png", mtime=NOW - timedelta(days=31))

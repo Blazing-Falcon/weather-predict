@@ -60,7 +60,7 @@ def get(
                     pass
                 else:
                     if math.isfinite(retry_after) and retry_after >= 0:
-                        delay = retry_after
+                        delay = min(retry_after, 120.0)
 
         get_logger(__name__).warning("Retrying GET %s after %s", redact(url), reason)
         time.sleep(delay)

@@ -167,6 +167,8 @@ def retention(
                     reverse=True,
                 )
                 for version in versions[policy["keep_versions"] :]:
+                    if name == "models" and version.name == config.settings()["model"]["live_version"]:
+                        continue
                     delete(stats, version, directory_size(version), partial(rmtree, version))
             else:
                 _expire(

@@ -42,6 +42,16 @@ def test_get_returns_404_immediately(sleep):
     sleep.assert_not_called()
 
 
+@pytest.mark.parametrize("retry_after", ["120", "3600", "1e30"])
+def test_retry_after_is_capped(sleep, retry_after):
+    handler = Mock(side_effect=[
+        httpx.Response(429, headers={"Retry-After": retry_after}), httpx.Response(200),
+    ])
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        assert http.get(client, URL).status_code == 200
+    sleep.assert_called_once_with(120.0)
+
+
 def test_get_returns_final_retryable_status_and_redacts_retry_url(monkeypatch, sleep):
     token = uuid4().hex
     monkeypatch.setenv("EARTHDATA_TOKEN", token)

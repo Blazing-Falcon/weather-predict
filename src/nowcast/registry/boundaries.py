@@ -11,6 +11,7 @@ BOUNDARIES_URL = (
     "geoBoundaries-IDN-ADM2.geojson"
 )
 BOUNDARIES_NAME = "kabkota_full.geojson"
+BOUNDARIES_SHA256 = "947cedc058888c0c2b2628071d289956c85fe279adb369dcf1327ce2236a5602"
 
 
 def download(force: bool) -> None:
@@ -24,6 +25,9 @@ def download(force: bool) -> None:
         response = http.get(client, BOUNDARIES_URL)
         response.raise_for_status()
     content = response.content
+    digest = hashlib.sha256(content).hexdigest()
+    if digest != BOUNDARIES_SHA256:
+        raise ValueError(f"geoBoundaries sha256 mismatch: expected {BOUNDARIES_SHA256}, found {digest}")
     collection = json.loads(content)
     if not isinstance(collection, dict) or collection.get("type") != "FeatureCollection":
         raise ValueError("Expected a geoBoundaries GeoJSON FeatureCollection")
@@ -34,7 +38,7 @@ def download(force: bool) -> None:
     metadata = {
         "url": BOUNDARIES_URL,
         "bytes": len(content),
-        "sha256": hashlib.sha256(content).hexdigest(),
+        "sha256": digest,
         "fetched_at": utc_now(),
     }
     output.parent.mkdir(parents=True, exist_ok=True)

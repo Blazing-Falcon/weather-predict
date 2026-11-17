@@ -172,6 +172,19 @@ def figures(leads: dict, output: Path, prefix: str = "step-06") -> None:
     fig.savefig(output / f"{prefix}-importance.png", dpi=150)
 
 
+def training_commit() -> str:
+    commit = config.env("NOWCAST_GIT_COMMIT")
+    if commit:
+        return commit
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=config.REPO_ROOT, text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return "unknown"
+
+
 def train(
     keep_features: Annotated[bool, typer.Option(help="Keep the temporary feature table.")] = False,
     check_repro: Annotated[bool, typer.Option(help="Train twice and compare test metrics.")] = False,
@@ -188,12 +201,8 @@ def train(
     root = paths.data_root()
     table_path = root / "tmp" / "features" / f"{start}_{end}"
     dataset = ds.dataset(table_path, format="parquet")
-    commit = subprocess.check_output(
-        ["git", "rev-parse", "HEAD"], cwd=config.REPO_ROOT, text=True
-    ).strip()
-    short_sha = subprocess.check_output(
-        ["git", "rev-parse", "--short", commit], cwd=config.REPO_ROOT, text=True
-    ).strip()
+    commit = training_commit()
+    short_sha = commit[:7]
     created = datetime.now(UTC)
     version = f"{created:%Y%m%dT%H%MZ}-{short_sha}"
     card = {
@@ -237,7 +246,7 @@ def train(
         (output / "card.json").write_text(
             json.dumps(card, indent=2, allow_nan=False) + "\n", encoding="utf-8"
         )
-        figures(card["leads"], config.REPO_ROOT / "docs" / "progress" / "img", figure_prefix)
+        figures(card["leads"], output, figure_prefix)
         output.rename(model_root / version)
     if not keep_features:
         shutil.rmtree(table_path)

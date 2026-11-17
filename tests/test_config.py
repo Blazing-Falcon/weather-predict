@@ -1,3 +1,8 @@
+import json
+import os
+import subprocess
+import sys
+
 import pytest
 
 from nowcast import config, paths
@@ -45,3 +50,42 @@ def test_ensure_layout(monkeypatch, tmp_path):
 def test_invalid_zone():
     with pytest.raises(ValueError, match="nope"):
         paths.zone("nope")
+
+
+def test_config_directory_override(tmp_path, monkeypatch):
+    (tmp_path / "settings.yaml").write_text("container: settings\n")
+    (tmp_path / "retention.yaml").write_text("container: retention\n")
+    monkeypatch.setenv("NOWCAST_CONFIG_DIR", str(tmp_path))
+    result = subprocess.run(
+        [sys.executable, "-c", """
+import json
+from nowcast import config
+from nowcast.registry import grids
+from nowcast.sources import gauges
+print(json.dumps([
+    str(config.CONFIG_DIR), config.settings(), config.retention(),
+    str(grids.MERGIR_PATH), str(gauges.GEO),
+]))
+"""], check=True, capture_output=True, text=True, env=os.environ.copy(),
+    )
+    assert json.loads(result.stdout) == [
+        str(tmp_path), {"container": "settings"}, {"container": "retention"},
+        str(tmp_path / "geo" / "mergir_grid.json"), str(tmp_path / "geo"),
+    ]
+
+
+def test_web_directory_override(tmp_path, monkeypatch):
+    (tmp_path / "index.html").write_text("<h1>Container Web</h1>")
+    monkeypatch.setenv("NOWCAST_WEB_DIR", str(tmp_path))
+    result = subprocess.run(
+        [sys.executable, "-c", """
+import json
+from fastapi.testclient import TestClient
+from nowcast import config
+from nowcast.api.app import app
+with TestClient(app) as client:
+    response = client.get("/")
+    print(json.dumps([str(config.WEB_DIR), response.status_code, response.text]))
+"""], check=True, capture_output=True, text=True, env=os.environ.copy(),
+    )
+    assert json.loads(result.stdout) == [str(tmp_path), 200, "<h1>Container Web</h1>"]

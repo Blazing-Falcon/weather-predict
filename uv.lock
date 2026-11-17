@@ -915,6 +915,7 @@ dependencies = [
     { name = "h5py" },
     { name = "httpx" },
     { name = "lightgbm" },
+    { name = "matplotlib" },
     { name = "opencv-python-headless" },
     { name = "pillow" },
     { name = "pyarrow" },
@@ -932,7 +933,6 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "matplotlib" },
     { name = "playwright" },
     { name = "pytest" },
     { name = "ruff" },
@@ -948,6 +948,7 @@ requires-dist = [
     { name = "h5py", specifier = "==3.16.0" },
     { name = "httpx", specifier = "==0.28.1" },
     { name = "lightgbm", specifier = "==4.7.0" },
+    { name = "matplotlib", specifier = "==3.11.2" },
     { name = "opencv-python-headless", specifier = "==5.1.0.95" },
     { name = "pillow", specifier = "==13.0.0" },
     { name = "pyarrow", specifier = "==26.0.1" },
@@ -965,7 +966,6 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "matplotlib", specifier = "==3.11.2" },
     { name = "playwright", specifier = "==1.62.0" },
     { name = "pytest", specifier = "==9.2.0" },
     { name = "ruff", specifier = "==0.17.6" },

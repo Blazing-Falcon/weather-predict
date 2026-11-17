@@ -6,9 +6,12 @@ import yaml
 from dotenv import load_dotenv
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-CONFIG_DIR = REPO_ROOT / "config"
 
-load_dotenv(REPO_ROOT / ".env", override=False)
+if (REPO_ROOT / ".env").is_file():
+    load_dotenv(REPO_ROOT / ".env", override=False)
+
+CONFIG_DIR = Path(os.environ.get("NOWCAST_CONFIG_DIR", REPO_ROOT / "config"))
+WEB_DIR = Path(os.environ.get("NOWCAST_WEB_DIR", REPO_ROOT / "web"))
 
 
 @cache

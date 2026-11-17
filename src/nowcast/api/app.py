@@ -217,4 +217,4 @@ def neighbours():
     return static_file(config.CONFIG_DIR / "geo" / "neighbours.geojson", "application/geo+json")
 
 
-app.mount("/", StaticFiles(directory=config.REPO_ROOT / "web", html=True), name="web")
+app.mount("/", StaticFiles(directory=config.WEB_DIR, html=True), name="web")

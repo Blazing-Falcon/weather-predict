@@ -1,6 +1,7 @@
 import json
+import subprocess
 from datetime import UTC, datetime
-from types import SimpleNamespace
+from unittest.mock import Mock
 
 import numpy as np
 import pyarrow as pa
@@ -106,7 +107,7 @@ def test_train_scores_every_test_split(tmp_path, monkeypatch, capsys, extra_spli
     })
     monkeypatch.setitem(model, "early_stopping_rounds", 2)
     monkeypatch.setattr(config, "REPO_ROOT", tmp_path)
-    monkeypatch.setattr(train, "subprocess", SimpleNamespace(check_output=lambda *a, **k: "abc"))
+    monkeypatch.setattr(train, "training_commit", lambda: "abc")
     monkeypatch.setenv("DATA_ROOT", str(tmp_path))
 
     kwargs = {"figure_prefix": "full-run"} if extra_split else {}
@@ -129,8 +130,34 @@ def test_train_scores_every_test_split(tmp_path, monkeypatch, capsys, extra_spli
         name for name in list(periods)[2:] for _ in range(12)
     ]
     assert lines[-1] == "repro ok"
-    images = tmp_path / "docs" / "progress" / "img"
+    images = next((tmp_path / "models").glob("*/card.json")).parent
     prefix = kwargs.get("figure_prefix", "step-06")
     with Image.open(images / f"{prefix}-reliability.png") as image:
         assert image.size == (1800, 600 * (count - 2))
     assert (images / f"{prefix}-importance.png").is_file()
+
+
+def test_training_commit_from_environment(monkeypatch):
+    monkeypatch.setenv("NOWCAST_GIT_COMMIT", "123456789abcdef")
+    git = Mock(side_effect=AssertionError("git must not be called"))
+    monkeypatch.setattr(train.subprocess, "check_output", git)
+    assert train.training_commit() == "123456789abcdef"
+    git.assert_not_called()
+
+
+def test_training_commit_from_git(monkeypatch):
+    monkeypatch.delenv("NOWCAST_GIT_COMMIT", raising=False)
+    git = Mock(return_value="123456789abcdef\n")
+    monkeypatch.setattr(train.subprocess, "check_output", git)
+    assert train.training_commit() == "123456789abcdef"
+    git.assert_called_once_with(
+        ["git", "rev-parse", "HEAD"], cwd=config.REPO_ROOT, text=True,
+        stderr=subprocess.DEVNULL,
+    )
+
+
+@pytest.mark.parametrize("error", [FileNotFoundError(), subprocess.CalledProcessError(128, "git")])
+def test_training_commit_without_git_checkout(monkeypatch, error):
+    monkeypatch.delenv("NOWCAST_GIT_COMMIT", raising=False)
+    monkeypatch.setattr(train.subprocess, "check_output", Mock(side_effect=error))
+    assert train.training_commit() == "unknown"

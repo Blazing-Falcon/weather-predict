@@ -1,4 +1,5 @@
-from datetime import UTC, datetime
+import os
+from datetime import UTC, datetime, timedelta
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 from unittest.mock import patch
@@ -6,9 +7,12 @@ from unittest.mock import patch
 from dagster import (
     AssetKey,
     DagsterEventType,
+    DagsterInstance,
+    DagsterRunStatus,
     DefaultScheduleStatus,
     DefaultSensorStatus,
     Definitions,
+    build_op_context,
 )
 
 spec = spec_from_file_location(
@@ -93,3 +97,32 @@ def test_disk_budget_override(monkeypatch, tmp_path):
     check, = result.filter_events(lambda event: event.event_type == DagsterEventType.ASSET_CHECK_EVALUATION)
     assert not check.event_specific_data.passed
     assert check.event_specific_data.severity.value == "ERROR"
+
+
+def test_dagster_cleanup_uses_instance_storage_without_home(monkeypatch, tmp_path):
+    monkeypatch.delenv("DAGSTER_HOME", raising=False)
+    with DagsterInstance.local_temp(str(tmp_path)) as instance:
+        job = defs.resolve_job_def("retention_job")
+        active = instance.create_run_for_job(job, status=DagsterRunStatus.STARTED)
+        finished = instance.create_run_for_job(job, status=DagsterRunStatus.SUCCESS)
+        logs = Path(instance.storage_directory())
+        old = (datetime.now(UTC) - timedelta(days=31)).timestamp()
+        files = {}
+        for run_id in (active.run_id, finished.run_id, "orphan"):
+            folder = logs / run_id / "compute_logs"
+            folder.mkdir(parents=True)
+            for name in ("old", "recent"):
+                path = folder / name
+                path.write_text("log")
+                if name == "old":
+                    os.utime(path, (old, old))
+                files[run_id, name] = path
+
+        with build_op_context(instance=instance) as context:
+            definitions.expire_dagster_history(context)
+
+        assert files[active.run_id, "old"].exists()
+        assert files[active.run_id, "recent"].exists()
+        for run_id in (finished.run_id, "orphan"):
+            assert not files[run_id, "old"].exists()
+            assert files[run_id, "recent"].exists()

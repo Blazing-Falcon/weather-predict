@@ -337,7 +337,7 @@ def expire_dagster_history(context: OpExecutionContext):
     for record in records:
         instance.delete_run(record.dagster_run.run_id)
 
-    log_root = Path(config.env("DAGSTER_HOME")) / "storage"
+    log_root = Path(instance.storage_directory())
     for log_dir in log_root.glob("*/compute_logs"):
         run = instance.get_run_by_id(log_dir.parent.name)
         if run is not None and not run.is_finished:

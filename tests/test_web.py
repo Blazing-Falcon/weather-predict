@@ -31,6 +31,7 @@ def test_web_static_files_and_api_priority(tmp_path, monkeypatch):
             ("/js/drawer.js", "text/javascript"),
             ("/js/format.js", "text/javascript"),
             ("/js/map.js", "text/javascript"),
+            ("/js/overview.js", "text/javascript"),
             ("/js/palette.js", "text/javascript"),
             ("/js/state.js", "text/javascript"),
             ("/js/timeline.js", "text/javascript"),
@@ -61,7 +62,7 @@ def test_web_references_use_approved_urls():
 
         script = "\n".join(
             client.get(path).text
-            for path in ("/app.js", "/js/api.js", "/js/charts.js", "/js/dom.js", "/js/drawer.js", "/js/format.js", "/js/map.js", "/js/palette.js", "/js/state.js", "/js/timeline.js",)
+            for path in ("/app.js", "/js/api.js", "/js/charts.js", "/js/dom.js", "/js/drawer.js", "/js/format.js", "/js/map.js", "/js/overview.js", "/js/palette.js", "/js/state.js", "/js/timeline.js",)
         )
         urls = set(re.findall(r"""['"`]((?:https?://|/[a-z])[^'"`\s]*)""", script))
         urls.discard("http://www.w3.org/2000/svg")

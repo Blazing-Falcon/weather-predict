@@ -25,6 +25,13 @@ def test_web_static_files_and_api_priority(tmp_path, monkeypatch):
 
         for path, media_type in (
             ("/app.js", "text/javascript"),
+            ("/js/api.js", "text/javascript"),
+            ("/js/charts.js", "text/javascript"),
+            ("/js/dom.js", "text/javascript"),
+            ("/js/format.js", "text/javascript"),
+            ("/js/state.js", "text/javascript"),
+            ("/js/timeline.js", "text/javascript"),
+            ("/pipeline-content.js", "text/javascript"),
             ("/style.css", "text/css"),
             ("/maplibre.css", "text/css"),
             ("/maplibre-gl.js", "text/javascript"),
@@ -49,7 +56,10 @@ def test_web_references_use_approved_urls():
             "/maplibre-gl.js",
         }
 
-        script = client.get("/app.js").text
+        script = "\n".join(
+            client.get(path).text
+            for path in ("/app.js", "/js/api.js", "/js/charts.js", "/js/dom.js", "/js/format.js", "/js/state.js", "/js/timeline.js",)
+        )
         urls = set(re.findall(r"""['"`]((?:https?://|/[a-z])[^'"`\s]*)""", script))
         urls.discard("http://www.w3.org/2000/svg")
         assert {url.split("/")[1] for url in urls} == {"api", "tiles", "geo"}

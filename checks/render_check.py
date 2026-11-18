@@ -12,14 +12,14 @@ from playwright.sync_api import expect, sync_playwright
 
 from nowcast import paths
 
-BASE, APP = "", None
+BASE = ""
 # Area of the 1440 x 900 map that no overlay card covers.
 CLIP = {"x": 340, "y": 60, "width": 700, "height": 560}
 
 RENDER_LOG = """clip => {
     window.renderLog = [];
     window.metric = "cloud";
-    const canvas = map.getCanvas();
+    const canvas = nowcast.state.map.getCanvas();
     const gl = canvas.getContext("webgl2") ?? canvas.getContext("webgl");
     const box = canvas.getBoundingClientRect();
     const scale = canvas.width / box.width;
@@ -27,7 +27,7 @@ RENDER_LOG = """clip => {
     const y = canvas.height - Math.round((clip.y - box.top + clip.height) * scale);
     const pixels = new Uint8Array(w * h * 4);
     // The drawing buffer is still intact during the render event, so this reads what the frame drew.
-    map.on("render", () => {
+    nowcast.state.map.on("render", () => {
         gl.readPixels(x, y, w, h, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
         let hits = 0, total = 0;
         for (let i = 0; i < pixels.length; i += 16) {
@@ -38,10 +38,10 @@ RENDER_LOG = """clip => {
             total++;
         }
         renderLog.push({
-            frame, playing: !!playing, share: hits / total,
-            cloud: map.getLayoutProperty("cloud", "visibility"),
-            rain: map.getLayoutProperty("rain", "visibility"),
-            areas: frameRow(layerData[layer], frame)?.some(value => value != null) ?? false,
+            frame: nowcast.state.frame, playing: !!nowcast.state.playing, share: hits / total,
+            cloud: nowcast.state.map.getLayoutProperty("cloud", "visibility"),
+            rain: nowcast.state.map.getLayoutProperty("rain", "visibility"),
+            areas: nowcast.frameRow(nowcast.layerData[nowcast.state.layer], nowcast.state.frame)?.some(value => value != null) ?? false,
         });
     });
 }"""
@@ -83,13 +83,9 @@ def open_map(browser, width, height):
     errors = []
     page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
     page.on("pageerror", lambda e: errors.append(str(e)))
-    if APP:
-        page.route(
-            "**/app.js", lambda route: route.fulfill(path=APP, content_type="text/javascript")
-        )
     page.goto(BASE + "/", timeout=30000)
     expect(page.locator("#view-map")).to_have_attribute("aria-busy", "false", timeout=30000)
-    page.wait_for_function("() => map.loaded()")
+    page.wait_for_function("() => nowcast.state.map.loaded()")
     if page.locator("#drawer").is_visible():
         page.get_by_role("button", name="Close area panel").click()
     page.evaluate(RENDER_LOG, CLIP)
@@ -97,21 +93,21 @@ def open_map(browser, width, height):
 
 
 def settle(page):
-    page.wait_for_function("() => map.loaded() && !map.isMoving()")
+    page.wait_for_function("() => nowcast.state.map.loaded() && !nowcast.state.map.isMoving()")
     page.wait_for_timeout(150)
 
 
 def play(page, out, name, seconds):
     """Play from frame 0, keep the per-render log and a strip of screenshots."""
-    page.evaluate(f"setFrame(0); metric = {json.dumps(name)}")
+    page.evaluate(f"nowcast.setFrame(0); metric = {json.dumps(name)}")
     settle(page)
     page.evaluate("renderLog.length = 0")
     page.get_by_role("button", name="Play").click()
     strip = []
     end = time.monotonic() + seconds
-    while time.monotonic() < end and page.evaluate("!!playing"):
+    while time.monotonic() < end and page.evaluate("!!nowcast.state.playing"):
         strip.append(shot(page)[::4, ::4])
-    if page.evaluate("!!playing"):
+    if page.evaluate("!!nowcast.state.playing"):
         page.get_by_role("button", name="Pause").click()
     columns = 10
     rows = [
@@ -172,15 +168,15 @@ def rain_grid(page, out, last_obs):
     page.locator("#raw").check()
     missing, rows = [], []
     for index in range(last_obs + 1):
-        page.evaluate(f"setFrame({index})")
-        page.wait_for_function("() => map.loaded()")
+        page.evaluate(f"nowcast.setFrame({index})")
+        page.wait_for_function("() => nowcast.state.map.loaded()")
         page.wait_for_timeout(250)
         # The 60 s refresh can move the timeline, so read the slot and its tile from the page.
         slot = page.evaluate("""() => {
-            const stamp = new Date(tms(frame)).toISOString().replace(/[-:]/g, "").slice(0, 13) + "Z";
-            return {stamp, tile: meta.tile_times.rain.includes(stamp),
-                    observed: tms(frame) <= Date.parse(meta.latest_observed_slot),
-                    visible: map.getLayoutProperty("rain", "visibility") === "visible"};
+            const stamp = new Date(nowcast.frameTime(nowcast.state.frame)).toISOString().replace(/[-:]/g, "").slice(0, 13) + "Z";
+            return {stamp, tile: nowcast.state.meta.tile_times.rain.includes(stamp),
+                    observed: nowcast.frameTime(nowcast.state.frame) <= Date.parse(nowcast.state.meta.latest_observed_slot),
+                    visible: nowcast.state.map.getLayoutProperty("rain", "visibility") === "visible"};
         }""")
         if not slot["observed"]:
             continue
@@ -220,16 +216,12 @@ def refresh(playwright):
             route.fulfill(response=response, body=json.dumps(data))
 
         page.route("**/api/meta", handle)
-        if APP:
-            page.route(
-                "**/app.js", lambda route: route.fulfill(path=APP, content_type="text/javascript")
-            )
         page.goto(BASE + ("/" if view == "map" else "/#overview"))
         expect(page.locator(f"#view-{view}")).to_have_attribute("aria-busy", "false", timeout=30000)
         if view == "map":
-            page.wait_for_function("() => map.loaded()")
+            page.wait_for_function("() => nowcast.state.map.loaded()")
             page.evaluate(RENDER_LOG, CLIP)
-            page.evaluate("setFrame(60)")
+            page.evaluate("nowcast.setFrame(60)")
         else:
             page.evaluate("window.scrollTo(0, 600)")
             page.wait_for_timeout(500)
@@ -252,23 +244,20 @@ def refresh(playwright):
 
 
 def main():
-    global BASE, APP
+    global BASE
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("label", help="Output folder name, for example before or after")
     parser.add_argument("--url", default="http://127.0.0.1:8000")
     parser.add_argument("--seconds", type=float, default=30)
     parser.add_argument("--skip-refresh", action="store_true")
-    parser.add_argument(
-        "--app", help="Serve this app.js instead of the one in web/, to measure an older version"
-    )
     args = parser.parse_args()
-    BASE, APP = args.url.rstrip("/"), args.app
+    BASE = args.url.rstrip("/")
     out = paths.zone("tmp") / "render-check" / args.label
     out.mkdir(parents=True, exist_ok=True)
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True, args=["--enable-unsafe-swiftshader"])
         page, errors = open_map(browser, 1440, 900)
-        meta = page.evaluate("meta")
+        meta = page.evaluate("nowcast.state.meta")
         rain_tiles, cloud_tiles, last_obs = tile_frames(meta)
         print(
             f"Frames with a cloud tile: {len(cloud_tiles)} of 97; missing {sorted(set(range(97)) - cloud_tiles)}"

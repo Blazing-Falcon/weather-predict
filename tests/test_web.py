@@ -36,6 +36,7 @@ def test_web_static_files_and_api_priority(tmp_path, monkeypatch):
             ("/js/model.js", "text/javascript"),
             ("/js/overview.js", "text/javascript"),
             ("/js/palette.js", "text/javascript"),
+            ("/js/pipeline.js", "text/javascript"),
             ("/js/state.js", "text/javascript"),
             ("/js/timeline.js", "text/javascript"),
             ("/pipeline-content.js", "text/javascript"),
@@ -57,7 +58,6 @@ def test_web_references_use_approved_urls():
         assert len([url for url in refs.urls if url.startswith("#")]) == 7
         assert {url for url in refs.urls if not url.startswith("#")} == {
             "/app.js",
-            "/pipeline-content.js",
             "/style.css",
             "/maplibre.css",
             "/maplibre-gl.js",
@@ -78,6 +78,7 @@ def test_web_references_use_approved_urls():
                 "/js/model.js",
                 "/js/overview.js",
                 "/js/palette.js",
+                "/js/pipeline.js",
                 "/js/state.js",
                 "/js/timeline.js",
             )

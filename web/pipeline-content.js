@@ -1,6 +1,6 @@
 // Content for the clickable Pipeline diagram. Layout: col 0..6, row 0..8.
 // `dataset` names a path under DATA_ROOT that /api/pipeline/node/{id} can sample.
-const PIPELINE = {
+export const PIPELINE = {
   columns: [
     { id: "sources", title: "Sources", text: "Where the data comes from. Every source except BMKG keeps its own archive, so we can fetch any past file again." },
     { id: "ingest", title: "Ingest", text: "Jobs that check for new data, download it and save it untouched. Each one keeps a cursor, so it never fetches the same file twice." },

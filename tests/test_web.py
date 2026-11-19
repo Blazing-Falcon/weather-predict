@@ -37,6 +37,7 @@ def test_web_static_files_and_api_priority(tmp_path, monkeypatch):
             ("/js/overview.js", "text/javascript"),
             ("/js/palette.js", "text/javascript"),
             ("/js/pipeline.js", "text/javascript"),
+            ("/js/settings.js", "text/javascript"),
             ("/js/state.js", "text/javascript"),
             ("/js/timeline.js", "text/javascript"),
             ("/pipeline-content.js", "text/javascript"),
@@ -79,6 +80,7 @@ def test_web_references_use_approved_urls():
                 "/js/overview.js",
                 "/js/palette.js",
                 "/js/pipeline.js",
+                "/js/settings.js",
                 "/js/state.js",
                 "/js/timeline.js",
             )

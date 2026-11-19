@@ -1,74 +1,21 @@
 import { loadAlerts, loadBmkgAlerts, renderAlerts, wireAlerts } from "./js/alerts.js";
 import { alertUrl, read, renderDataStatus } from "./js/api.js";
 import { $ } from "./js/dom.js";
-import { drawDrawer, openDrawer, wireDrawer } from "./js/drawer.js";
+import { openDrawer, wireDrawer } from "./js/drawer.js";
 import { areaLabel } from "./js/format.js";
 import { renderHistory, wireHistory } from "./js/history.js";
 import {
-  applyFrame, initMap, layerData, loadMapFrames, paint, renderMapStatus, renderScoreboard,
-  resetTimeline, setFrame, stop, updateWhen, wireMap,
+  applyFrame, initMap, layerData, loadMapFrames, renderMapStatus, renderScoreboard, resetTimeline,
+  setFrame, stop, updateWhen, wireMap,
 } from "./js/map.js";
 import { renderModel } from "./js/model.js";
 import { renderFreshness, renderOverview } from "./js/overview.js";
 import { renderPipeline, wirePipeline } from "./js/pipeline.js";
-import { state, store, toggleWatch, views } from "./js/state.js";
+import { applyTheme, renderSettings, wireSettings } from "./js/settings.js";
+import { state, toggleWatch, views } from "./js/state.js";
 import {
   archiveStamp, frameRow, frameTime, loadFrames, setTimeline, useLatestProbabilities,
 } from "./js/timeline.js";
-
-function applyTheme() {
-  if (state.settings.theme === "system") document.documentElement.removeAttribute("data-theme");
-  else document.documentElement.dataset.theme = state.settings.theme;
-  document.querySelectorAll("[data-theme-set]").forEach(button => {
-    button.setAttribute("aria-pressed", button.dataset.themeSet === state.settings.theme);
-  });
-  paint();
-  drawDrawer();
-  if (state.view === "history" && state.meta) renderHistory();
-}
-
-function renderSettings() {
-  $("setThr").value = state.settings.thr;
-  $("setZoom").value = state.settings.zoom;
-  $("setCloud").value = state.settings.cloud;
-  $("setGauges").checked = state.settings.gauges;
-  const labels = [...state.watch].map(id => state.areaById.get(id)?.label).filter(Boolean);
-  $("setWatchD").textContent = labels.length ? labels.join(", ") : "No areas yet. Use ☆ in an area panel or on the Alerts page.";
-  $("setGaugeD").textContent = state.meta?.gauge_stations.length ? `Show ${state.meta.gauge_stations.length} METAR airports as rings.`
-    : "Show METAR airports as rings.";
-}
-
-function wireSettings() {
-  document.addEventListener("click", event => {
-    const theme = event.target.closest("[data-theme-set]");
-    if (theme) {
-      state.settings.theme = theme.dataset.themeSet;
-      store.set("theme", state.settings.theme);
-      applyTheme();
-    }
-  });
-  for (const [id, key, event, value] of [
-    ["setThr", "thr", "change", input => Number(input.value)],
-    ["setZoom", "zoom", "change", input => input.value],
-    ["setCloud", "cloud", "input", input => Number(input.value)],
-    ["setGauges", "gauges", "change", input => input.checked],
-  ]) {
-    $(id).addEventListener(event, async e => {
-      state.settings[key] = value(e.target);
-      store.set(key, state.settings[key]);
-      if (key === "thr") await loadAlerts();
-      else paint();
-    });
-  }
-  $("setWatchClear").addEventListener("click", () => {
-    state.watch.clear();
-    store.set("watch", []);
-    renderSettings();
-  });
-  state.prefersLight.addEventListener("change", () => {
-    if (state.settings.theme === "system") applyTheme();
-  });
-}
 
 let route = 0;
 let mapSetup;

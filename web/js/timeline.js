@@ -4,7 +4,6 @@ import { clock, clockWib, dayFormat } from "./format.js";
 import { halfHour, leads, state } from "./state.js";
 
 export const frameTime = index => state.timelineStart + index * halfHour;
-
 export const archivedFrame = stamp => (Date.parse(stamp) - state.timelineStart) / halfHour;
 
 export function timelineTicks(start, hours) {

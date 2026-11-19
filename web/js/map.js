@@ -1,21 +1,19 @@
 import { read, renderDataStatus } from "./api.js";
 import { $, mapPadding } from "./dom.js";
 import { drawDrawer, openDrawer } from "./drawer.js";
-import { bmkgNames, clock, clockWib, compactFormat, dayClockWib, decimal, emptyRow, escape, fmtTime, pct, percent, scoreNames, size } from "./format.js";
+import {
+  bmkgNames, clock, clockWib, compactFormat, dayClockWib, decimal, emptyRow, escape, fmtTime, pct, 
+  percent, scoreNames, size,
+} from "./format.js";
 import { paletteColors, rainClass } from "./palette.js";
 import { halfHour, state, store } from "./state.js";
 import { forecastWindow, frameRow, frameTime, loadFrames, setTimeline, valueAt } from "./timeline.js";
 
 let raw = false;
-
 let pendingFrames = 0;
-
 let paintedLayer;
-
 let paintedValues;
-
 let hovered;
-
 let hoverPoint;
 
 export function loadMapFrames() {
@@ -33,7 +31,6 @@ const legend = {
 };
 
 export const layerData = { get fc() { return "prob" + state.settings.lead; }, ob: "obs", bm: "bmkg", ds: "disagree" };
-
 const zoomBounds = {
   id: [[94.8, -11.2], [141.2, 6.2]], jawa: [[105.1, -8.9], [116.3, -5.7]],
   jatim: [[110.9, -8.9], [116.3, -6.6]],
@@ -88,7 +85,6 @@ export function updateWhen() {
 }
 
 const raster = {};
-
 const tileImages = new Map();
 
 function addRaster(name, before) {
@@ -106,7 +102,6 @@ function addRaster(name, before) {
 }
 
 const stem = index => new Date(frameTime(index)).toISOString().replace(/[-:]/g, "").slice(0, 13) + "Z";
-
 const stemTime = scan => Date.parse(scan.replace(/(\d{4})(\d\d)(\d\d)T(\d\d)(\d\d)Z/, "$1-$2-$3T$4:$5Z"));
 
 // The latest image at or before the frame, up to 2 h old, so a short gap keeps the last picture.

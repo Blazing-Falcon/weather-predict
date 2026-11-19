@@ -32,5 +32,4 @@ export function read(url, label, cache = "default") {
 }
 
 const threshold = () => Math.round(state.settings.thr * 100);
-
 export const alertUrl = (limit = threshold()) => `/api/alerts?threshold=${limit}`;

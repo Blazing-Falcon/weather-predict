@@ -18,5 +18,4 @@ const palette = {
 };
 
 export const paletteColors = () => palette[state.settings.theme === "system" ? (state.prefersLight.matches ? "light" : "dark") : state.settings.theme];
-
 export const rainClass = value => value < 0.1 ? 0 : value < 1 ? 1 : value < 3 ? 2 : value < 8 ? 3 : 4;

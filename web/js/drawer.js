@@ -7,7 +7,6 @@ import { chartFrames, halfHour, state, toggleWatch } from "./state.js";
 import { archiveStamp, archivedFrame, forecastWindow, frameRow, frameTime, valueAt } from "./timeline.js";
 
 let drawerDetailFailed = false;
-
 let drawerOpener = null;
 
 export async function openDrawer(id, zoom, opener) {

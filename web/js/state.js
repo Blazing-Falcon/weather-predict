@@ -1,4 +1,3 @@
-
 export const store = {
   get(key, fallback) {
     try {
@@ -17,11 +16,8 @@ export const store = {
 };
 
 export const views = ["map", "overview", "alerts", "model", "history", "pipeline", "settings"];
-
 export const halfHour = 30 * 60 * 1000;
-
 export const chartFrames = 48 * 2 + 1;
-
 export const leads = [1, 2, 3];
 
 export function toggleWatch(id) {

@@ -1,8 +1,5 @@
-
 export const blank = "—";
-
 export const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
 const dateFormat = new Intl.DateTimeFormat("en-GB", {
   weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
   hourCycle: "h23", timeZone: "Asia/Jakarta",
@@ -18,29 +15,17 @@ const clockFormat = new Intl.DateTimeFormat("en-GB", {
 });
 
 export const dayFormat = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone: "Asia/Jakarta" });
-
 export const fmtTime = value => dateFormat.format(new Date(value)).replace(",", "") + " WIB";
-
 export const clock = value => clockFormat.format(new Date(value));
-
 export const clockWib = value => value == null ? blank : clock(value) + " WIB";
-
 export const dayClockWib = value => `${dayFormat.format(new Date(value))} ${clockWib(value)}`;
-
 export const pct = value => value == null ? blank : Math.round(value * 100) + "%";
-
 export const percent = value => value == null ? blank : Math.round(value) + "%";
-
 export const decimal = (value, digits = 2) => value == null ? blank : value.toFixed(digits);
-
 export const temp = value => value == null ? blank : Math.round(value - 273.15) + " °C";
-
 const countFormat = new Intl.NumberFormat("en-GB");
-
 export const compactFormat = new Intl.NumberFormat("en-GB", { notation: "compact", maximumFractionDigits: 1 });
-
 export const count = value => value == null ? blank : countFormat.format(value);
-
 export const size = value => value >= 1e9 ? (value / 1e9).toFixed(2) + " GB"
   : value >= 1e6 ? (value / 1e6).toFixed(1) + " MB" : Math.round(value / 1e3) + " KB";
 
@@ -53,7 +38,6 @@ export const escape = value => String(value ?? "").replace(/[&<>"']/g, c => ({
 })[c]);
 
 export const emptyRow = (columns, message) => `<tr><td colspan="${columns}" class="note">${message}</td></tr>`;
-
 export const bmkgNames = {
   0: ["Cerah", "Sunny"],
   1: ["Cerah", "Sunny"],

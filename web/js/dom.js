@@ -1,6 +1,4 @@
-
 export const $ = id => document.getElementById(id);
-
 export const svgEl = (tag, attrs, label) => {
   const element = document.createElementNS("http://www.w3.org/2000/svg", tag);
   for (const [name, value] of Object.entries(attrs)) element.setAttribute(name, value);

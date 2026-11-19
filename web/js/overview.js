@@ -1,7 +1,7 @@
 import { barsH, chartNote, fitChart, lineChart } from "./charts.js";
 import { $, tiles } from "./dom.js";
 import {
-  blank, bmkgText, clock, clockWib, count, emptyRow, escape, fmtTime, minutes, pct, percent, 
+  blank, bmkgText, clock, clockWib, count, emptyRow, escape, fmtTime, minutes, pct, percent,
   sources, temp,
 } from "./format.js";
 import { chartFrames, state } from "./state.js";

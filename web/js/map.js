@@ -2,7 +2,7 @@ import { read, renderDataStatus } from "./api.js";
 import { $, mapPadding } from "./dom.js";
 import { drawDrawer, openDrawer } from "./drawer.js";
 import {
-  bmkgNames, clock, clockWib, compactFormat, dayClockWib, decimal, emptyRow, escape, fmtTime, pct, 
+  bmkgNames, clock, clockWib, compactFormat, dayClockWib, decimal, emptyRow, escape, fmtTime, pct,
   percent, scoreNames, size,
 } from "./format.js";
 import { paletteColors, rainClass } from "./palette.js";

@@ -54,7 +54,7 @@ All Python code is in `src/nowcast/`. Imports go one way: shared modules, then `
 | `api/` | See [api.md](api.md#code) |
 | `doctor.py`, `retention.py` | Environment and upstream checks; retention and disk budget |
 
-`orchestration/definitions.py` holds the Dagster assets, checks, jobs, sensors and schedules. `config/` holds the settings, the retention policy, the geographic reference files and the ENSO table. `tests/` covers each module with temporary data roots.
+`config/schedule.yaml` defines the runner jobs and timers. `config/` holds the settings, the retention policy, the geographic reference files and the ENSO table. `tests/` covers each module with temporary data roots.
 
 ## Web App
 

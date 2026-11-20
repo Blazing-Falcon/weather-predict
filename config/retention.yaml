@@ -19,5 +19,3 @@ datasets:
   gold/tiles/rain:       {keep: 31 days}
   gold/tiles/cloud:      {keep: 31 days}
   models:                {keep_versions: 5}
-  dagster_runs:          {keep: 30 days}
-  dagster_compute_logs:  {keep: 30 days}

@@ -11,11 +11,11 @@ export function renderPipeline(data) {
   plStorage = data?.storage || {};
   renderPipelineSelection();
   if (!data) return;
-  $("runBody").innerHTML = data.dagster_runs.map(row => `
-    <tr><td class="mono">${escape(row.job)}</td><td class="mono">${row.start_time == null ? blank : clockWib(row.start_time * 1000)}</td>
-    <td class="num">${row.duration_seconds == null ? blank : decimal(row.duration_seconds, 1) + " s"}</td>
-    <td><span class="chip" style="color:${row.status === "SUCCESS" ? "var(--green)" : row.status === "FAILURE" ? "var(--red)" : "var(--muted)"}">${escape(row.status.toLowerCase())}</span></td></tr>`
-  ).join("") || emptyRow(4, "No Dagster runs archived.");
+  $("runBody").innerHTML = data.runs.map(row => `
+    <tr><td class="mono">${escape(row.job)}</td><td class="mono">${row.started == null ? blank : clockWib(row.started)}</td>
+    <td class="num">${row.seconds == null ? blank : decimal(row.seconds, 1) + " s"}</td>
+    <td><span class="chip" style="color:${row.status === "success" ? "var(--green)" : row.status === "failure" ? "var(--red)" : "var(--muted)"}">${escape(row.status.toLowerCase())}</span></td></tr>`
+  ).join("") || emptyRow(4, "No runs archived.");
   const rows = Object.entries(data.storage).sort((a, b) => b[1].bytes - a[1].bytes);
   const top = rows.filter(([, entry]) => entry.bytes > 0).slice(0, 8).map(([label, entry]) =>
     ({ label, values: [[entry.bytes, "var(--aqua)"]] }));

@@ -1,8 +1,6 @@
 import gzip
 import json
-import sqlite3
 from collections import defaultdict
-from contextlib import closing
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
@@ -26,27 +24,17 @@ from nowcast.model.cards import model_card
 from nowcast.retention import directory_size, disk_usage
 
 
-def dagster_runs(root):
-    path = root / "dagster" / "history" / "runs.db"
-    if not path.is_file():
-        return []
+def recent_runs(root):
+    """The newest run of each job, newest first."""
     try:
-        with closing(
-            sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=0.05)
-        ) as connection:
-            connection.row_factory = sqlite3.Row
-            rows = connection.execute(
-                "SELECT run_id, pipeline_name AS job, status, create_timestamp AS created_at, "
-                "start_time, end_time, end_time - start_time AS duration_seconds "
-                "FROM runs ORDER BY id DESC LIMIT 20"
-            )
-            return [dict(row) for row in rows]
-    except sqlite3.OperationalError as error:
-        if error.sqlite_errorcode not in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED) and (
-            path.is_file() and str(error) != "no such table: runs"
-        ):
-            raise
+        with (root / "state" / "runs.jsonl").open(encoding="utf-8") as stream:
+            newest = {
+                run["job"]: run
+                for run in map(json.loads, (line for line in stream if line.endswith("\n")))
+            }
+    except FileNotFoundError:
         return []
+    return sorted(newest.values(), key=lambda run: run["started"], reverse=True)
 
 
 def latency_stats(root, now):
@@ -98,17 +86,10 @@ def pipeline(archive, now):
     sizes = report["datasets"]
     for name, directory in (
         (CLIMATOLOGY, root / CLIMATOLOGY),
-        ("dagster_runs", root / "dagster" / "history"),
     ):
         if directory.is_dir() and name not in sizes:
             sizes[name] = directory_size(directory)
             sizes["other"] -= sizes[name]
-    if "dagster_compute_logs" not in sizes:
-        logs = sum(
-            directory_size(directory) for directory in (root / "dagster" / "storage").glob("*/compute_logs")
-        )
-        sizes["dagster_compute_logs"] = logs
-        sizes["other"] -= logs
     settings = config.settings()
     processed = {}
     for source, dataset, where in (("imerg", RAIN, ""), ("mergir", CLOUD, "WHERE source = 1")):
@@ -151,7 +132,7 @@ def pipeline(archive, now):
         "storage_total_bytes": report["total_bytes"],
         "storage_budget_gb": report["budget_gb"],
         "processed_vs_stored": processed,
-        "dagster_runs": dagster_runs(root),
+        "runs": recent_runs(root),
         "imerg_backfill": read_json(root / "state" / "imerg_backfill.json") or {},
     }
 

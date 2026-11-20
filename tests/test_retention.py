@@ -136,18 +136,14 @@ def test_mtime_and_independent_nested_policy(root):
     old = write(tiles / "old.png", mtime=NOW - timedelta(days=31))
     recent = write(tiles / "recent.png", mtime=NOW - timedelta(days=30))
     dlq = write(root / "bronze/bmkg/_dlq/date=2025-11-29/records.jsonl.gz")
-    dagster = write(root / "dagster_runs/old.db", mtime=NOW - timedelta(days=90))
 
     report = run_retention(root)
 
     assert not old.exists()
     assert recent.exists()
     assert not dlq.parent.exists()
-    assert dagster.exists()
     assert report["datasets"]["bronze/bmkg"] == {"deleted_count": 0, "bytes_freed": 0}
     assert report["datasets"]["bronze/bmkg/_dlq"] == {"deleted_count": 1, "bytes_freed": 4}
-    assert report["datasets"]["dagster_runs"]["skipped"]
-    assert report["datasets"]["dagster_compute_logs"]["skipped"]
 
 
 def test_dry_run(root):

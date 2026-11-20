@@ -169,7 +169,7 @@ def history(response: Response, area_id: AreaId, data: Archive):
     )
 
 
-@app.get("/api/pipeline", summary="Get job health, latency, storage and recent Dagster runs")
+@app.get("/api/pipeline", summary="Get job health, latency, storage and recent runs")
 def pipeline(response: Response, data: Archive):
     response.headers["Cache-Control"] = LIVE_CACHE
     return cached(pipeline_data.pipeline, data, datetime.now(UTC))

@@ -25,7 +25,7 @@ uv run nowcast doctor
 | `BMKG_MAX_RPM` | `bmkg.max_rpm` (55) | BMKG requests per minute, at most 55 (BMKG allows 60) |
 | `IMERG_LAG_MINUTES` | `model.imerg_lag_minutes` (360) | Overrides the feature lag; leave unset |
 | `LOG_LEVEL` | `INFO` | Log level |
-| `DISK_BUDGET_GB` | `budget_gb` in `retention.yaml` | Budget for the Dagster disk check |
+| `DISK_BUDGET_GB` | `budget_gb` in `retention.yaml` | Budget for the daily disk check |
 
 `.env` in the repo root is read when it exists; variables already set win.
 
@@ -48,26 +48,9 @@ uv run nowcast model train
 
 Backfills skip months that are done and can be stopped and started again; `--force` redoes done months. One failed granule stops the month with an error, so run the command again. Do not run the IMERG and MERGIR backfills at the same time, and do not run Spark jobs and training together on a 7 GB machine.
 
-## Live Loops
+## Live Runner
 
-| Job | Command | Every | Dagster |
-|---|---|---|---|
-| IMERG | `nowcast imerg tick` | 10 min | `imerg_sensor` |
-| Himawari | `nowcast himawari tick` | 5 min | `himawari_sensor` |
-| BMKG | `nowcast bmkg tick`, then `nowcast bmkg parse --month YYYY-MM` | 15 min | `bmkg_sensor` |
-| Forecasts | `nowcast live score`, `nowcast gold frames`, `nowcast live verify` | 5 min | none yet |
-| Daily scores | `nowcast live daily` (yesterday) | 00:40 UTC | none yet |
-| METAR | `nowcast gauges metar` | hourly at :20 | `gauges_schedule` |
-| Retention | `nowcast retention` | 01:30 UTC | `retention_schedule` |
-
-`orchestration/definitions.py` defines Dagster assets, sensors and schedules, all stopped by default. The forecast and daily jobs have no Dagster job yet:
-
-```bash
-mkdir -p data/dagster && cp orchestration/dagster.yaml data/dagster/
-DAGSTER_HOME=$PWD/data/dagster uv run dagster dev -w orchestration/workspace.yaml
-```
-
-Dagster runs at most one NASA backfill at a time (`pool: nasa`).
+`nowcast runner` executes `config/schedule.yaml` in two serial lanes. BMKG has its own lane so slow requests do not block other jobs. The runner replaced Dagster. See [deployment](deploy.md).
 
 ## Locks
 
@@ -87,7 +70,7 @@ Each job holds an `flock` lock in `state/`. The kernel releases it when the proc
 
 ## Health
 
-Each job writes `state/health/<job>.json` with its last run and counts. `GET /api/pipeline` and the Pipeline page show them with latency, storage and the recent Dagster runs. `nowcast imerg gaps --month YYYY-MM` and `nowcast mergir gaps --month YYYY-MM` list missing slots.
+Each job writes `state/health/<job>.json` with its last run and counts. `GET /api/pipeline` and the Pipeline page show them with latency, storage and the recent runner runs. `nowcast imerg gaps --month YYYY-MM` and `nowcast mergir gaps --month YYYY-MM` list missing slots.
 
 ## Recovery
 
@@ -114,7 +97,7 @@ The API only reads. DuckDB may open files only inside `DATA_ROOT`; a symlink ins
 
 ```bash
 uv run --frozen pytest -q
-uv run --frozen ruff check src tests orchestration checks
+uv run --frozen ruff check src tests checks
 ```
 
 With an API running, `checks/` holds three browser and timing checks: `api_timing.py` (median and p95 request times), `web_check.py --url ...` (every page at desktop and phone size, console errors and failed requests, screenshots in `DATA_ROOT/tmp/web-shots/`) and `render_check.py <label> --url ...` (map rendering while the timeline plays).

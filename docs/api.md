@@ -21,11 +21,13 @@
 | `GET /api/scores` | `scope` (`national`, `island`, `province`, `area`), `id`, `lead` (1 to 3), `days` (default 30) | Daily score rows |
 | `GET /api/model` | | The live model card, the test BSS of every model version, and live CSI at a 50% cutoff over 30 days, by local hour and by island |
 | `GET /api/history/{area_id}` | `area_id` | Climatology, monthly and yearly rain totals in local time with slot counts, ENSO phase per year (from `config/enso/roni.csv`) and wet-season onset |
-| `GET /api/pipeline` | | Job health files, source latency (last, median and p90 over 24 h), storage per dataset with its retention cap, grid values processed, the IMERG backfill state and the 20 newest Dagster runs |
+| `GET /api/pipeline` | | Job health files, source latency (last, median and p90 over 24 h), storage per dataset with its retention cap, grid values processed, the IMERG backfill state and the 10 newest runner runs |
 | `GET /api/pipeline/node/{node_id}` | `node_id`: `br_bmkg`, `br_himawari`, `br_imerg`, `br_gauges`, `br_mergir`, `br_ref`, `sv_bmkg`, `sv_cloud`, `sv_rain`, `sv_gauge`, `gd_frames`, `gd_tiles`, `gd_pred`, `gd_verif`, `gd_scores`, `gd_hindcast`, `gd_clim`, `md_models` | For Parquet datasets: columns, newest partition, row count, newest time and 3 sample rows. For file datasets: file count, the 3 newest files and a JSON preview for BMKG and METAR. For models: versions, the live version and its test BSS. 404 for other IDs. |
 | `GET /tiles/rain/{YYYYMMDDTHHMMZ}.png` | | IMERG rain tile |
 | `GET /tiles/cloud/{YYYYMMDDTHHMMZ}.webp` | | Himawari cloud tile |
 | `GET /geo/kabkota.geojson`, `GET /geo/neighbours.geojson` | | Display boundaries of the areas and of neighbouring land |
+
+The pipeline response includes `runs`, the newest 10 complete records from `state/runs.jsonl`, newest first. Each record has `job`, `lane`, `started` (UTC ISO timestamp), `seconds`, `status` (`success` or `failure`), and `exit_code`. Missing history returns an empty list.
 
 ## Code
 
@@ -35,4 +37,4 @@
 | `api/archive.py` | The DuckDB connection (limited to the data root), file discovery with partition pruning, and the shared dataset readers |
 | `api/live.py` | Meta, area detail and alerts |
 | `api/insight.py` | Model page and history page, ENSO phases |
-| `api/pipeline.py` | Pipeline page and node inspector, Dagster runs, latency |
+| `api/pipeline.py` | Pipeline page and node inspector, runner runs, latency |

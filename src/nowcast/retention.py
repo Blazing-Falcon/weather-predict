@@ -23,7 +23,6 @@ PARTITIONS = (
     (r"year=(\d{4}/month=\d{2})", "%Y/month=%m", "month"),
     (r"year=(\d{4})", "%Y", "year"),
 )
-DAGSTER_DATASETS = {"dagster_runs", "dagster_compute_logs"}
 
 
 def _shift(stamp: datetime, count: int, unit: str) -> datetime:
@@ -152,10 +151,7 @@ def retention(
     for name, policy in datasets.items():
         dataset = root / name
         stats = {"deleted_count": 0, "bytes_freed": 0}
-        if name in DAGSTER_DATASETS:
-            logger.info("%s: handled by the Dagster cleanup job", name)
-            stats["skipped"] = True
-        elif dataset.is_dir() and dataset.resolve() == dataset:
+        if dataset.is_dir() and dataset.resolve() == dataset:
             if "keep_versions" in policy:
                 versions = sorted(
                     (

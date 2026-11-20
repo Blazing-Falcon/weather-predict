@@ -1,8 +1,6 @@
 import gzip
 import json
-import sqlite3
 from collections import defaultdict
-from contextlib import closing
 from datetime import UTC, datetime, timedelta
 
 import duckdb
@@ -340,7 +338,7 @@ def test_missing_datasets(client):
     assert client.get("/api/model").json()["card"] is None
     history = client.get("/api/history/2").json()
     assert history["yearly"] == history["enso"] == []
-    assert client.get("/api/pipeline").json()["dagster_runs"] == []
+    assert client.get("/api/pipeline").json()["runs"] == []
 
 
 def test_model_history_and_pipeline(client, archive, tmp_path):
@@ -412,14 +410,12 @@ def test_model_history_and_pipeline(client, archive, tmp_path):
             for i in (10, 20, 30)
         )
     )
-    runs = tmp_path / "dagster/history/runs.db"
-    runs.parent.mkdir(parents=True)
-    with closing(sqlite3.connect(runs)) as connection:
-        connection.executescript(
-            "CREATE TABLE runs (id, run_id, pipeline_name, status, create_timestamp, "
-            "start_time, end_time); "
-            "INSERT INTO runs VALUES (1, 'r1', 'score_now', 'SUCCESS', '2020-01-01', 1, 3);"
-        )
+    runs = tmp_path / "state/runs.jsonl"
+    runs.write_text("".join(json.dumps({
+        "job": ("himawari_tick", "live_score")[i % 2], "lane": "fast",
+        "started": (slot + timedelta(minutes=i)).isoformat(),
+        "seconds": i, "status": "success", "exit_code": 0,
+    }) + "\n" for i in range(12)) + '{"job": "bmkg_tick", "sta')
     pipeline = client.get("/api/pipeline").json()
     assert pipeline["health"]["imerg"]["new_slots"] == 1
     assert pipeline["latency_minutes"]["imerg"]["median_24h"] == 20
@@ -427,7 +423,9 @@ def test_model_history_and_pipeline(client, archive, tmp_path):
     assert pipeline["storage"]["silver/rain_kabkota"]["cap"] == {"keep": "10 years"}
     assert pipeline["processed_vs_stored"]["imerg"]["slots"] == 2
     assert pipeline["processed_vs_stored"]["imerg"]["values_processed"] == 172800
-    assert pipeline["dagster_runs"][0]["duration_seconds"] == 2
+    assert [(run["job"], run["seconds"]) for run in pipeline["runs"]] == [
+        ("live_score", 11), ("himawari_tick", 10),
+    ]
 
     openapi = client.get("/openapi.json").json()
     assert len(openapi["paths"]) == 13
@@ -626,3 +624,16 @@ def test_duckdb_restricts_file_access_to_data_root(tmp_path):
         for path in (outside, root / ".." / "data-other" / "outside.parquet"):
             with pytest.raises(duckdb.PermissionException, match="file system operations are disabled"):
                 connection.execute("SELECT * FROM read_parquet(?)", [str(path)]).fetchall()
+
+
+def test_database_memory_and_read_only_temp(monkeypatch, tmp_path):
+    archive_data.database.cache_clear()
+    monkeypatch.setattr(archive_data.os, "access", lambda *args: False)
+    monkeypatch.setitem(config.settings()["api"], "duckdb_memory_limit", "128MB")
+    connection = archive_data.database(tmp_path)
+    assert connection.execute("SELECT current_setting('temp_directory')").fetchone()[0] == (
+        "/tmp/duckdb"
+    )
+    assert connection.execute("SELECT current_setting('memory_limit')").fetchone()[0] == "122.0 MiB"
+    connection.close()
+    archive_data.database.cache_clear()

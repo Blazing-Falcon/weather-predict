@@ -1,5 +1,4 @@
 import json
-from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
 
 import numpy as np
@@ -12,8 +11,7 @@ from typer.testing import CliRunner
 from nowcast import config
 from nowcast.cli import app
 from nowcast.cloud import CLOUD_SCHEMA
-from nowcast.features.rows import available_imerg_slot
-from nowcast.features.spark import spark_session
+from nowcast.features.live import available_imerg_slot
 from nowcast.gold import frames
 from nowcast.model import bmkg_baseline, score, scores_daily, verify
 from nowcast.registry.dim_area import SCHEMA as AREA_SCHEMA
@@ -134,15 +132,13 @@ def test_score_leakage_and_first_write(root, monkeypatch):
         write_slots(root, "cloud_kabkota", cloud_data, CLOUD_SCHEMA, "part-himawari.parquet")
         write_slots(root, "rain_kabkota", rain_data, RAIN_SCHEMA)
 
-    with spark_session(root) as spark:
-        monkeypatch.setattr(score, "spark_session", lambda _: nullcontext(spark))
-        seed(cloud_rows, rain_rows)
-        present = score.live_features(root, [T], LAG)
-        seed(cloud_rows[:2], rain_rows[:2])
-        truncated = score.live_features(root, [T], LAG)
-        seed(cloud_rows[:2], rain_rows[:1])
-        missing = score.live_features(root, [T], LAG)
-        assert missing[score.RAIN_FEATURES].isna().all().all()
+    seed(cloud_rows, rain_rows)
+    present = score.live_features(root, [T], LAG)
+    seed(cloud_rows[:2], rain_rows[:2])
+    truncated = score.live_features(root, [T], LAG)
+    seed(cloud_rows[:2], rain_rows[:1])
+    missing = score.live_features(root, [T], LAG)
+    assert missing[score.RAIN_FEATURES].isna().all().all()
     pd.testing.assert_frame_equal(truncated, present)
     assert truncated.iloc[0]["imerg_slot"] == ANCHOR
     assert truncated.iloc[0]["rain_lag"] == pytest.approx(0.2)

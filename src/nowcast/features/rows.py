@@ -1,5 +1,5 @@
 import math
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 from pyspark.sql import Column, DataFrame, SparkSession, Window
@@ -7,6 +7,7 @@ from pyspark.sql import functions as F
 
 from nowcast import config
 from nowcast.cloud import CLOUD_PARTS
+from nowcast.features.live import FEATURES, KEYS, available_imerg_slot
 from nowcast.storage import month_path
 from nowcast.timeslots import LOCAL_OFFSETS, SLOT, SLOT_SECONDS, month_ranges
 
@@ -21,43 +22,6 @@ CLOUD_SCHEMA = (
 CLIM_KEYS = ["area_id", "month", "hour_local"]
 LEADS = (1, 2, 3)
 TARGETS = [f"y{lead}" for lead in LEADS]
-KEYS = ["t", "area_id", "imerg_slot", "cloud_slot"]
-FEATURES = [
-    "cold_pct",
-    "tb_min",
-    "tb_mean",
-    "cold_trend_1h",
-    "nb_cold_pct",
-    "adv1_pct",
-    "adv2_pct",
-    "adv3_pct",
-    "adv_max_pct",
-    "flow_kmh",
-    "rain_lag",
-    "wet_lag",
-    "rainmax_lag",
-    "rain_sum_3h",
-    "rain_sum_6h",
-    "rain_sum_24h",
-    "nb_rain_lag",
-    "hour_sin",
-    "hour_cos",
-    "doy_sin",
-    "doy_cos",
-    "area_km2",
-    "island",
-    "clim_wet_pct",
-    "clim_p1",
-    "clim_p2",
-    "clim_p3",
-]
-
-
-def available_imerg_slot(t: datetime, lag: int) -> datetime:
-    cutoff = t.astimezone(UTC) - timedelta(minutes=lag)
-    return cutoff.replace(minute=cutoff.minute // 30 * 30, second=0, microsecond=0)
-
-
 def slot_number(time: datetime) -> int:
     return int(time.timestamp()) // SLOT_SECONDS
 

@@ -13,15 +13,8 @@ import typer
 
 from nowcast import config, paths, storage
 from nowcast.cloud import CLOUD_PARTS
-from nowcast.features.rows import (
-    FEATURES,
-    KEYS,
-    admin_areas,
-    available_imerg_slot,
-    feature_rows,
-    read_climatology,
-)
-from nowcast.features.spark import spark_session
+from nowcast.features.live import FEATURES, KEYS, available_imerg_slot
+from nowcast.features.live import live_features as feature_frame
 from nowcast.locks import directory_lock, file_lock
 from nowcast.log import get_logger
 from nowcast.model.cards import model_card
@@ -65,22 +58,9 @@ def live_features(root, pending, lag):
             "IMERG slot %s is missing at scoring time (configured lag %d min)", slot, lag
         )
 
-    with spark_session(root) as spark:
-        rows = feature_rows(
-            spark,
-            root,
-            admin_areas(spark, root),
-            read_climatology(spark, root),
-            pending[0],
-            pending[-1] + SLOT,
-            lag,
-            1,
-            cloud_source=2,
-        )
-        table = rows.where(rows.t.isin(pending)).select(*KEYS, *FEATURES).toArrow()
-    frame = table.to_pandas(categories=["island"])
+    frame = feature_frame(root, pending, lag)
     frame.loc[frame["imerg_slot"].isin(missing), RAIN_FEATURES] = np.nan
-    return frame
+    return frame[KEYS + FEATURES]
 
 
 def predict(root: Path, pending: list[datetime]) -> tuple[pa.Table, dict]:

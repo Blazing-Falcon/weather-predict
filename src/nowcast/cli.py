@@ -4,15 +4,21 @@ import typer
 
 from nowcast import __version__
 from nowcast.doctor import doctor
-from nowcast.features import build, climatology
 from nowcast.gold import frames, gauge_check, tiles
 from nowcast.model import score, scores_daily, verify
-from nowcast.model.train import train
 from nowcast.registry.cli import app as registry_app
 from nowcast.retention import disk, retention
+from nowcast.runner import runner
 from nowcast.sources import gauges, himawari, imerg, mergir
 from nowcast.sources.bmkg.archive import tick as bmkg_tick
 from nowcast.sources.bmkg.forecast import parse as bmkg_parse
+
+try:
+    from nowcast.features import build, climatology
+    from nowcast.model.train import train
+except ModuleNotFoundError:
+    # The live image leaves out the train group (Spark, scikit-learn, matplotlib).
+    build = climatology = train = None
 
 app = typer.Typer(
     no_args_is_help=True,
@@ -43,6 +49,7 @@ def api(
 app.command()(doctor)
 app.command()(retention)
 app.command()(disk)
+app.command()(runner)
 app.add_typer(registry_app, name="registry")
 
 bmkg_app = typer.Typer(no_args_is_help=True, help="Archive live BMKG forecasts.")
@@ -75,14 +82,17 @@ gauges_app.command()(gauges.ghcnh)
 gauges_app.command()(gauges.metar)
 app.add_typer(gauges_app, name="gauges")
 
-features_app = typer.Typer(no_args_is_help=True, help="Build issue-time features and climatology.")
-features_app.command("build")(build.build)
-features_app.command("climatology")(climatology.climatology)
-app.add_typer(features_app, name="features")
+if train is not None:
+    features_app = typer.Typer(
+        no_args_is_help=True, help="Build issue-time features and climatology."
+    )
+    features_app.command("build")(build.build)
+    features_app.command("climatology")(climatology.climatology)
+    app.add_typer(features_app, name="features")
 
-model_app = typer.Typer(no_args_is_help=True, help="Train and evaluate nowcast models.")
-model_app.command("train")(train)
-app.add_typer(model_app, name="model")
+    model_app = typer.Typer(no_args_is_help=True, help="Train and evaluate nowcast models.")
+    model_app.command("train")(train)
+    app.add_typer(model_app, name="model")
 
 live_app = typer.Typer(no_args_is_help=True, help="Issue and verify live nowcast forecasts.")
 live_app.command()(score.score)

@@ -1,0 +1,15 @@
+- name: fast
+  jobs:
+    - {name: himawari_tick, command: [himawari, tick], every: 60}
+    - {name: live_score, command: [live, score], every: 60}
+    - {name: gold_frames, command: [gold, frames, --days, '3'], every: 120}
+    - {name: live_verify, command: [live, verify], every: 300}
+    - {name: imerg_tick, command: [imerg, tick], every: 600}
+    - {name: live_daily, command: [live, daily], every: 3600}
+    - {name: gauges_metar, command: [gauges, metar], every: 3600}
+    - {name: retention, command: [retention], at: '01:30'}
+    - {name: disk, command: [disk], at: '01:45'}
+- name: bmkg
+  jobs:
+    - {name: bmkg_tick, command: [bmkg, tick], every: 900, timeout: 1200}
+    - {name: bmkg_parse, command: [bmkg, parse], every: 900}

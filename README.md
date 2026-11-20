@@ -25,12 +25,32 @@ uv run nowcast doctor
 
 `DATA_ROOT` (default `./data`) holds all data in `ref/`, `bronze/`, `silver/`, `gold/`, `models/`, `state/` and `tmp/`. It is never committed. The Earthdata token is read only from the environment and is never printed or logged.
 
+## Commands to Know
+
+```bash
+uv run nowcast --help        # the command tree
+uv run nowcast imerg tick    # archive new IMERG rain
+uv run nowcast himawari tick # archive new Himawari scans
+uv run nowcast live score    # issue forecasts for new slots
+uv run nowcast api           # serve the API and the web app on 127.0.0.1:8000
+```
+
 ## Layout
 
 ```
-config/        settings.yaml (source constants), retention.yaml (window per dataset)
-src/nowcast/   package and the `nowcast` command
+src/nowcast/   the package and the `nowcast` command
+orchestration/ Dagster assets, sensors and schedules
+config/        settings.yaml, retention.yaml, geographic reference files, ENSO table
+web/           the web app (ES modules, no build step)
 checks/        API timing, web and map render checks against a running server
-docs/          API reference
 tests/
+docs/          how the system works
 ```
+
+## Docs
+
+- [Architecture](docs/architecture.md): data flow, live cycle, code map
+- [Data](docs/data.md): every dataset, its layout, columns and retention
+- [Model](docs/model.md): target, features, training, baselines, results
+- [Operations](docs/operations.md): setup, environment, schedules, locks, recovery
+- [API](docs/api.md): routes and responses

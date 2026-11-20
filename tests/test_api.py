@@ -527,7 +527,7 @@ def test_pipeline_bmkg_preview(client, tmp_path):
     "path,status",
     [
         ("/", 200),
-        ("/app.js", 200),
+        ("/js/main.js", 200),
         ("/api/meta", 200),
         ("/api/meta/", 404),
         ("/api/frames?layer=invalid", 422),

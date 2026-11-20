@@ -1,25 +1,28 @@
-import { loadAlerts, loadBmkgAlerts, renderAlerts, wireAlerts } from "./js/alerts.js";
-import { alertUrl, read, renderDataStatus } from "./js/api.js";
-import { $ } from "./js/dom.js";
-import { openDrawer, wireDrawer } from "./js/drawer.js";
-import { areaLabel } from "./js/format.js";
-import { renderHistory, wireHistory } from "./js/history.js";
+import { loadAlerts, loadBmkgAlerts, renderAlerts, wireAlerts } from "./alerts.js";
+import { alertUrl, read, renderDataStatus } from "./api.js";
+import { $ } from "./dom.js";
+import { openDrawer, wireDrawer } from "./drawer.js";
+import { areaLabel } from "./format.js";
+import { renderHistory, wireHistory } from "./history.js";
 import {
   applyFrame, initMap, layerData, loadMapFrames, renderMapStatus, renderScoreboard, resetTimeline,
   setFrame, stop, updateWhen, wireMap,
-} from "./js/map.js";
-import { renderModel } from "./js/model.js";
-import { renderFreshness, renderOverview } from "./js/overview.js";
-import { renderPipeline, wirePipeline } from "./js/pipeline.js";
-import { applyTheme, renderSettings, wireSettings } from "./js/settings.js";
-import { state, toggleWatch, views } from "./js/state.js";
+} from "./map.js";
+import { renderModel } from "./model.js";
+import { renderFreshness, renderOverview } from "./overview.js";
+import { renderPipeline, wirePipeline } from "./pipeline.js";
+import { applyTheme, renderSettings, wireSettings } from "./settings.js";
+import { state, toggleWatch, views } from "./state.js";
 import {
   archiveStamp, frameRow, frameTime, loadFrames, setTimeline, useLatestProbabilities,
-} from "./js/timeline.js";
+} from "./timeline.js";
 
 let route = 0;
 let mapSetup;
 let pendingArea = null;
+let metaRequest;
+let initialAlerts;
+let resizeTimer;
 
 function initMeta(data) {
   state.meta = data;
@@ -95,9 +98,6 @@ async function renderView(current) {
   } else if (current === "settings") renderSettings();
 }
 
-let metaRequest;
-let initialAlerts;
-
 async function refreshMeta() {
   const data = await read("/api/meta", "Archive metadata", "no-cache");
   if (!data) return false;
@@ -160,7 +160,6 @@ document.addEventListener("click", event => {
     renderAlerts();
     document.querySelector(`[data-star="${star.dataset.star}"]`)?.focus();
   }
-
 });
 
 wireMap();
@@ -181,16 +180,10 @@ $("dataRetry").addEventListener("click", async () => {
 });
 
 wireDrawer();
-
 wireAlerts();
-
 wireHistory();
-
 wireSettings();
-
 addEventListener("hashchange", show);
-
-let resizeTimer;
 
 addEventListener("resize", () => {
   clearTimeout(resizeTimer);
@@ -213,13 +206,11 @@ for (const link of tabs.children) tabResize.observe(link);
 wirePipeline();
 
 applyTheme();
-
 metaRequest = refreshMeta();
-
 initialAlerts = loadAlerts();
-
 show();
 
+// New slots land every few minutes; reload the timeline and frames when the archive moves.
 setInterval(async () => {
   if (state.playing || !state.meta || $("dataRetry").disabled) return;
   state.requests.clear();

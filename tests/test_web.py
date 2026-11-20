@@ -24,7 +24,6 @@ def test_web_static_files_and_api_priority(tmp_path, monkeypatch):
         assert client.get("/missing.js").status_code == 404
 
         for path, media_type in (
-            ("/app.js", "text/javascript"),
             ("/js/alerts.js", "text/javascript"),
             ("/js/api.js", "text/javascript"),
             ("/js/charts.js", "text/javascript"),
@@ -32,6 +31,7 @@ def test_web_static_files_and_api_priority(tmp_path, monkeypatch):
             ("/js/drawer.js", "text/javascript"),
             ("/js/format.js", "text/javascript"),
             ("/js/history.js", "text/javascript"),
+            ("/js/main.js", "text/javascript"),
             ("/js/map.js", "text/javascript"),
             ("/js/model.js", "text/javascript"),
             ("/js/overview.js", "text/javascript"),
@@ -58,7 +58,7 @@ def test_web_references_use_approved_urls():
         refs.feed(client.get("/").text)
         assert len([url for url in refs.urls if url.startswith("#")]) == 7
         assert {url for url in refs.urls if not url.startswith("#")} == {
-            "/app.js",
+            "/js/main.js",
             "/style.css",
             "/maplibre.css",
             "/maplibre-gl.js",
@@ -67,7 +67,6 @@ def test_web_references_use_approved_urls():
         script = "\n".join(
             client.get(path).text
             for path in (
-                "/app.js",
                 "/js/alerts.js",
                 "/js/api.js",
                 "/js/charts.js",
@@ -75,6 +74,7 @@ def test_web_references_use_approved_urls():
                 "/js/drawer.js",
                 "/js/format.js",
                 "/js/history.js",
+                "/js/main.js",
                 "/js/map.js",
                 "/js/model.js",
                 "/js/overview.js",

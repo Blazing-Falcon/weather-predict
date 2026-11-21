@@ -31,4 +31,4 @@ docker compose up -d --build
 docker image prune -f
 ```
 
-Run history is stored in `state/runs.jsonl` and trimmed at 2 MB. Container logs rotate at three 10 MB files per service. Data retention runs daily at 01:30 UTC; the disk check runs at 01:45 UTC.
+Run history (`state/runs.jsonl`) and the latency logs are trimmed at 2 MB. Container logs rotate at three 10 MB files per service. Data retention runs daily at 01:30 UTC; the disk check runs at 01:45 UTC.

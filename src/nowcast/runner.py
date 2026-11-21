@@ -1,4 +1,3 @@
-import json
 import os
 import signal
 import subprocess
@@ -14,6 +13,7 @@ import yaml
 
 from nowcast import config, paths
 from nowcast.log import get_logger
+from nowcast.storage import append_lines
 
 LOG_LIMIT = 2 * 1024 * 1024
 _log_lock = Lock()
@@ -21,17 +21,7 @@ _log_lock = Lock()
 
 def append_run(path, record):
     with _log_lock:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8") as stream:
-            stream.write(json.dumps(record) + "\n")
-        if path.stat().st_size > LOG_LIMIT:
-            with path.open("rb") as stream:
-                stream.seek(-LOG_LIMIT // 2, os.SEEK_END)
-                stream.readline()
-                newest = stream.read()
-            temporary = path.with_suffix(".tmp")
-            temporary.write_bytes(newest)
-            temporary.replace(path)
+        append_lines(path, [record], LOG_LIMIT)
 
 
 def daily_due(job, now):

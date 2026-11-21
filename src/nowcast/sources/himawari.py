@@ -21,7 +21,14 @@ from nowcast.gold.tiles import tile_path, write_bounds, write_cloud
 from nowcast.locks import file_lock
 from nowcast.log import command_errors, get_logger
 from nowcast.registry.grids import Grid, imerg_grid, mergir_grid
-from nowcast.storage import atomic_write, month_path, write_bytes, write_json, write_table
+from nowcast.storage import (
+    append_lines,
+    atomic_write,
+    month_path,
+    write_bytes,
+    write_json,
+    write_table,
+)
 from nowcast.timeslots import SLOT, UTC_US
 from nowcast.zonal import Zonal
 
@@ -295,11 +302,10 @@ def _record_latency(path: Path, scan: datetime, ready_at: datetime, last_record:
     if last_record is not None and last_record["scan"] == scan.isoformat():
         latency = last_record["latency_min"]
     else:
-        with path.open("a", encoding="utf-8") as log:
-            log.write(json.dumps({
-                "scan": scan.isoformat(), "ready_at": ready_at.isoformat(),
-                "latency_min": latency, "model_slot": is_model_slot(scan),
-            }) + "\n")
+        append_lines(path, [{
+            "scan": scan.isoformat(), "ready_at": ready_at.isoformat(),
+            "latency_min": latency, "model_slot": is_model_slot(scan),
+        }])
     get_logger(__name__).info(
         "Himawari scan %s latency_min=%.2f model_slot=%s",
         scan.isoformat(), latency, is_model_slot(scan),

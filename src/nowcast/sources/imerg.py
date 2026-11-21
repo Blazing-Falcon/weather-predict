@@ -23,7 +23,7 @@ from nowcast.locks import directory_lock, file_lock
 from nowcast.log import command_errors, get_logger
 from nowcast.registry.grids import Grid, imerg_grid, mergir_grid
 from nowcast.sources import earthdata
-from nowcast.storage import month_path, scaled, write_json, write_table
+from nowcast.storage import append_lines, month_path, scaled, write_json, write_table
 from nowcast.timeslots import SLOT, UTC_US, month_ranges, next_month, slot_range
 from nowcast.zonal import Zonal
 
@@ -414,21 +414,22 @@ def _record_latency(
                     recorded.add((entry["slot"], entry["title"]))
     if granules:
         logger = get_logger(__name__)
-        with latency_path.open("a", encoding="utf-8") as log:
-            for granule in granules:
-                slot = granule.slot.isoformat()
-                if (slot, granule.title) in recorded:
-                    continue
-                last_latency = (seen_at - (granule.slot + SLOT)).total_seconds() / 60
-                log.write(json.dumps({
-                    "slot": slot,
-                    "title": granule.title,
-                    "version": granule.version,
-                    "seen_at": seen_at.isoformat(),
-                    "latency_min": last_latency,
-                }) + "\n")
-                recent.append(last_latency)
-                logger.info("IMERG slot %s latency_min=%.2f", slot, last_latency)
+        entries = []
+        for granule in granules:
+            slot = granule.slot.isoformat()
+            if (slot, granule.title) in recorded:
+                continue
+            last_latency = (seen_at - (granule.slot + SLOT)).total_seconds() / 60
+            entries.append({
+                "slot": slot,
+                "title": granule.title,
+                "version": granule.version,
+                "seen_at": seen_at.isoformat(),
+                "latency_min": last_latency,
+            })
+            recent.append(last_latency)
+            logger.info("IMERG slot %s latency_min=%.2f", slot, last_latency)
+        append_lines(latency_path, entries)
 
     return last_latency, recent
 

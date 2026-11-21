@@ -43,6 +43,19 @@ def write_bytes(path: Path, content: bytes) -> None:
         file.write(content)
 
 
+def append_lines(path: Path, records: list[dict], limit: int = 2 * 1024 * 1024) -> None:
+    """Append JSON lines; past the limit, keep only the newest half of the file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as stream:
+        stream.writelines(json.dumps(record) + "\n" for record in records)
+    if path.stat().st_size > limit:
+        with path.open("rb") as stream:
+            stream.seek(-limit // 2, os.SEEK_END)
+            stream.readline()
+            newest = stream.read()
+        write_bytes(path, newest)
+
+
 def write_json(path: Path, values: dict, *, indent: int | None = 2, allow_nan: bool = True) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     write_bytes(path, (json.dumps(values, indent=indent, allow_nan=allow_nan) + "\n").encode("utf-8"))

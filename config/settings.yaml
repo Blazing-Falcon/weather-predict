@@ -100,3 +100,6 @@ model:
     - area_km2
     - island
     - clim_wet_pct
+
+api:
+  duckdb_memory_limit: 256MB

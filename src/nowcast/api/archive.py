@@ -1,4 +1,5 @@
 import json
+import os
 from collections import defaultdict
 from datetime import date, timedelta
 from functools import lru_cache
@@ -32,7 +33,14 @@ def read_json(path: Path):
 
 @lru_cache(maxsize=1)
 def database(root: Path):
-    connection = duckdb.connect(config={"threads": "2"})
+    settings = config.settings().get("api", {})
+    options = {
+        "threads": str(settings.get("threads", 2)),
+        "memory_limit": settings.get("duckdb_memory_limit", "256MB"),
+    }
+    if not os.access(root, os.W_OK):
+        options["temp_directory"] = "/tmp/duckdb"
+    connection = duckdb.connect(config=options)
     connection.execute("SET allowed_directories = ?", [[str(root.resolve())]])
     connection.execute("SET enable_external_access = false")
     return connection

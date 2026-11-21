@@ -49,12 +49,3 @@ services:
       timeout: 10s
       start_period: 30s
       retries: 3
-
-  cloudflared:
-    <<: *common
-    image: cloudflare/cloudflared:2025.11.1
-    command: [tunnel, run]
-    environment:
-      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
-    profiles: [tunnel]
-    mem_limit: 128m

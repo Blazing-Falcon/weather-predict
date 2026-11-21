@@ -56,9 +56,9 @@ Rain and cloud rows exist for each of the 514 admin areas and each 30-min slot. 
 
 | Dataset | Layout | Retention | Columns |
 |---|---|---|---|
-| `gold/climatology` | `part.parquet` | 10 years | `area_id`, `month`, `hour_local`, `wet_pct`, `rain_mean_x10`, `p1` to `p3` (event probability for each lead, percent), `n` |
+| `gold/climatology` | `part.parquet` | not set (rebuilt by hand) | `area_id`, `month`, `hour_local`, `wet_pct`, `rain_mean_x10`, `p1` to `p3` (event probability for each lead, percent), `n` |
 | `gold/predictions` | monthly `part.parquet` | 12 months | `issued_at`, `t` (issue slot), `area_id`, `lead_h`, `prob_pct`, `model_version`, `cloud_slot`, `imerg_slot` |
-| `gold/hindcast` | monthly `part.parquet` | not set | Same columns as predictions, for past slots scored later; never mixed into predictions |
+| `gold/hindcast` | monthly `part.parquet` | 12 months | Same columns as predictions, for past slots scored later; never mixed into predictions |
 | `gold/verification` | monthly `part.parquet` | 12 months | Prediction columns plus `verified_at`, `observed`, `clim_pct`, `persist_pct`, `motion_pct`, `bmkg_rain`, `bmkg_analysis_time` |
 | `gold/scores_daily` | monthly `part.parquet` | 10 years | `day`, `scope` (national, island, province), `scope_id`, `lead_h`, `source`, `n`, `brier`, `bss`, `csi`, `pod`, `far`, `base_rate` |
 | `gold/map_frames` | `date=YYYY-MM-DD/part.parquet` | 31 days | `slot`, `area_id`, `layer`, `value` (long format, see below) |
@@ -84,7 +84,7 @@ Map frame layers:
 | File | Written by | Content |
 |---|---|---|
 | `imerg_live.json`, `himawari_live.json`, `score_live.json` | the live ticks | Cursor: the newest slot or scan done |
-| `imerg_latency.jsonl`, `himawari_latency.jsonl` | the live ticks | One line per new slot: when it appeared and how late |
+| `imerg_latency.jsonl`, `himawari_latency.jsonl` | the live ticks | One line per new slot: when it appeared and how late; trimmed at 2 MB |
 | `bmkg.json` | `bmkg tick` | Per run: first seen, areas done, areas missing, complete |
 | `imerg_backfill.json`, `mergir_backfill.json` | backfills | Per month: done, slot counts, missing slots, timings |
 | `mergir_last_frame.npz`, `himawari_last_frame.npz`, `himawari_index.npz` | MERGIR backfill, Himawari tick | Last frame for motion across runs; Himawari pixel-to-grid index |

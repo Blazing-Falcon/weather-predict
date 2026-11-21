@@ -14,6 +14,7 @@ datasets:
   silver/gauge_obs:      {keep: 10 years}
   gold/predictions:      {keep: 12 months}
   gold/verification:     {keep: 12 months}
+  gold/hindcast:         {keep: 12 months}
   gold/scores_daily:     {keep: 10 years}
   gold/map_frames:       {keep: 31 days}
   gold/tiles/rain:       {keep: 31 days}

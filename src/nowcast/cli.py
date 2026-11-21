@@ -107,3 +107,7 @@ gold_app.command("tiles")(tiles.backfill)
 gold_app.command("gauge-check")(gauge_check.gauge_check)
 app.add_typer(gold_app, name="gold")
 app.command()(api)
+
+
+if __name__ == "__main__":
+    app()

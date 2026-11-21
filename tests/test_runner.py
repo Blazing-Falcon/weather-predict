@@ -1,5 +1,6 @@
 import json
 import signal
+import subprocess
 import sys
 import threading
 from datetime import UTC, datetime
@@ -157,3 +158,10 @@ def test_shutdown_kills_uncooperative_child(tmp_path):
     thread.join(timeout=3)
     assert not thread.is_alive()
     assert records(tmp_path)[0]["exit_code"] == -signal.SIGKILL
+
+
+def test_default_command_runs_the_cli(tmp_path):
+    """The runner starts jobs as `python -m nowcast.cli`, so the module must run the app."""
+    command = Runner([], tmp_path).command
+    result = subprocess.run([*command, "--version"], capture_output=True, text=True, check=True)
+    assert result.stdout.startswith("nowcast ")

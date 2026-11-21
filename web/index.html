@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Kab/Kota Rain Nowcast</title>
+  <title>HephaWeather</title>
   <link rel="stylesheet" href="/maplibre.css">
   <link rel="stylesheet" href="/style.css">
   <script defer src="/maplibre-gl.js"></script>
@@ -11,7 +11,7 @@
 </head>
 <body>
 <header class="top gutter">
-  <div class="brand"><b>~/</b>rain-nowcast</div>
+  <div class="brand"><b>Hepha</b>Weather</div>
   <nav class="tabs" aria-label="Views">
     <a href="#map" data-view="map">Map</a>
     <a href="#overview" data-view="overview">Overview</a>
@@ -34,7 +34,7 @@
     <div class="banner" id="banner" role="status" hidden></div>
     <div class="ov ov-left">
       <div class="card">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><span class="live" id="sourceStatus"><i></i><span id="sourceState">LOADING</span></span><span class="note mono" id="mapIssue"></span></div>
+        <div><span class="note mono" id="mapIssue"></span></div>
         <dl class="kv">
           <dt>Himawari-9 frame</dt><dd id="mapCloud">—</dd>
           <dt>IMERG rain slot</dt><dd id="mapRain">—</dd>

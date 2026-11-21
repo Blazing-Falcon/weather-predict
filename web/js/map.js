@@ -365,10 +365,6 @@ export function renderScoreboard(scores) {
 }
 
 export function renderMapStatus(data) {
-  const issueAge = state.meta?.freshness_minutes.model;
-  const live = issueAge != null && issueAge >= 0 && issueAge <= 60;
-  $("sourceState").textContent = !state.meta ? "OFFLINE" : live ? "LIVE" : state.meta.latest_issue_slot ? "ARCHIVE" : "NO ISSUE";
-  $("sourceStatus").classList.toggle("archive", !live);
   if (!state.meta) return;
   $("mapIssue").textContent = state.meta.latest_issue_slot ? fmtTime(state.meta.latest_issue_slot) : "";
   $("mapCloud").textContent = clockWib(state.meta.latest_slots.himawari);

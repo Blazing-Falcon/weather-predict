@@ -4,6 +4,8 @@
 
 For each of the 514 admin kab/kota and each issue time `t` (every 30 min), the model gives the probability that the area-mean IMERG rain reaches 0.5 mm/h or more in at least one 30-min slot of the next 1, 2 and 3 hours (`target.threshold_mm_h`, `target.leads_h`). The target for lead `n` exists only when all `2n` slots of that window are in the archive.
 
+The model sees Himawari-9 cloud tops from minutes ago and IMERG rain from about 6 hours ago. Rain means what IMERG reports later, so the model predicts a satellite estimate, not a rain gauge.
+
 ## Features
 
 Features are built with Spark in `features/rows.py` (`feature_rows`), the same code for training and live scoring.
@@ -56,6 +58,24 @@ Live model `20261120T1329Z-a2f52f2` (from its card). Brier skill score (BSS) is 
 | Test 2026 | +3 h | 0.406 | 0.921 | 0.756 | -0.555 | -0.087 |
 
 Every lead stopped at the 2000-tree cap, so more trees may help. Calibration was not needed.
+
+CSI (critical success index) is hits ÷ (hits + misses + false alarms). Model and climatology say rain above the cutoff tuned on validation 2024; persistence and motion are 0 or 1. Test 2025, 4.5 million rows per lead:
+
+| Lead | Model | Motion | Climatology | Persistence |
+|---|---:|---:|---:|---:|
+| +1 h | 0.58 | 0.46 | 0.30 | 0.21 |
+| +2 h | 0.60 | 0.51 | 0.35 | 0.22 |
+| +3 h | 0.61 | 0.54 | 0.39 | 0.22 |
+
+BMKG can be scored only live, because its API serves only the current forecast. Live CSI over the first 37 hours (issues from 2026-11-20 00:00 to 2026-11-21 13:00 UTC, about 35,000 rows per lead, rows with a BMKG value only):
+
+| Lead | Model | BMKG | Motion | Climatology |
+|---|---:|---:|---:|---:|
+| +1 h | 0.40 | 0.26 | 0.37 | 0.36 |
+| +2 h | 0.47 | 0.33 | 0.43 | 0.44 |
+| +3 h | 0.48 | 0.39 | 0.46 | 0.50 |
+
+At +3 h the model does not beat climatology yet. That is 37 hours of one season, too short to judge; the Model page shows the running numbers.
 
 ## Live Scoring and Verification
 

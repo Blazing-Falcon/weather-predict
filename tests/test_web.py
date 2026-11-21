@@ -62,6 +62,7 @@ def test_web_references_use_approved_urls():
             "/style.css",
             "/maplibre.css",
             "/maplibre-gl.js",
+            "/favicon.svg",
         }
 
         script = "\n".join(

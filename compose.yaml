@@ -1,0 +1,60 @@
+name: nowcast
+
+x-common: &common
+  restart: unless-stopped
+  read_only: true
+  tmpfs:
+    - /tmp:size=128m,mode=1777
+  init: true
+  user: "1000:1000"
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "3"
+
+services:
+  runner:
+    <<: *common
+    image: nowcast:local
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    command: [nowcast, runner]
+    env_file: .env
+    environment:
+      DATA_ROOT: /data
+    volumes:
+      - ${NOWCAST_DATA:-./data}:/data
+    mem_limit: 1500m
+    stop_grace_period: 25s
+
+  api:
+    <<: *common
+    image: nowcast:local
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    command: [nowcast, api, --host, 0.0.0.0, --port, '8000']
+    environment:
+      DATA_ROOT: /data
+    volumes:
+      - ${NOWCAST_DATA:-./data}:/data:ro
+    ports:
+      - ${API_BIND:-127.0.0.1}:${API_PORT:-8000}:8000
+    mem_limit: 700m
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/meta', timeout=5).read()"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+
+  cloudflared:
+    <<: *common
+    image: cloudflare/cloudflared:2025.11.1
+    command: [tunnel, run]
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    profiles: [tunnel]
+    mem_limit: 128m

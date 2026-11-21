@@ -25,6 +25,10 @@ uv run nowcast doctor
 
 `DATA_ROOT` (default `./data`) holds all data in `ref/`, `bronze/`, `silver/`, `gold/`, `models/`, `state/` and `tmp/`. It is never committed. The Earthdata token is read only from the environment and is never printed or logged.
 
+## Run the Live System
+
+Prepare the data folder and `.env` as described in [Deployment](docs/deploy.md), then run `docker compose up -d`. The runner schedules all live jobs; the API serves the web app. Training stays on the dev machine.
+
 ## Commands to Know
 
 ```bash
@@ -39,7 +43,6 @@ uv run nowcast api           # serve the API and the web app on 127.0.0.1:8000
 
 ```
 src/nowcast/   the package and the `nowcast` command
-orchestration/ Dagster assets, sensors and schedules
 config/        settings.yaml, retention.yaml, geographic reference files, ENSO table
 web/           the web app (ES modules, no build step)
 checks/        API timing, web and map render checks against a running server
